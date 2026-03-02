@@ -112,6 +112,15 @@ type Cohort = {
 };
 
 
+type FrictionAnalysis = {
+  dominantStruggle: 'No Interest' | 'No Time' | 'Not Engaging' | 'No Understanding' | 'None';
+  severity: 'Low' | 'Medium' | 'High';
+  explanation: string;
+  signals: string[];
+  scores: Record<string, number>;
+  contentFriction: boolean;
+};
+
 type ActivityLearner = {
   eventId?: string;
   userId: string;
@@ -125,6 +134,7 @@ type ActivityLearner = {
   derivedStatus: string | null;
   statusReason: string | null;
   createdAt: string;
+  analysis?: FrictionAnalysis | null;
 };
 
 type ActivitySummary = {
@@ -198,6 +208,8 @@ export default function TutorDashboardPage() {
   const [activeAlertFilter, setActiveAlertFilter] = useState<'all' | 'engaged' | 'attention_drift' | 'content_friction' | 'unknown'>('all');
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  // --- Friction Radar State ---
+  const [alertViewMode, setAlertViewMode] = useState<'all' | 'radar'>('all');
 
   const QUICK_PROMPTS = [
     "Which learners are inactive this week?",
@@ -429,6 +441,45 @@ export default function TutorDashboardPage() {
     if (activeAlertFilter === 'all') return list;
     return list.filter(l => l.derivedStatus === activeAlertFilter);
   }, [activityResponse, activeAlertFilter]);
+
+  // Friction Radar — groups learners by their dominant struggle category
+  type FrictionCategory = 'No Understanding' | 'No Interest' | 'Not Engaging' | 'No Time';
+  const FRICTION_CATEGORIES: { key: FrictionCategory; icon: string; color: string; bg: string; border: string }[] = [
+    { key: 'No Understanding', icon: '❓', color: '#7C3AED', bg: '#F5F3FF', border: '#C4B5FD' },
+    { key: 'No Interest', icon: '😴', color: '#DC2626', bg: '#FEF2F2', border: '#FCA5A5' },
+    { key: 'Not Engaging', icon: '😒', color: '#D97706', bg: '#FFFBEB', border: '#FCD34D' },
+    { key: 'No Time', icon: '⏰', color: '#2563EB', bg: '#EFF6FF', border: '#93C5FD' },
+  ];
+
+  const frictionGroups = useMemo(() => {
+    const learners = activityResponse?.learners ?? [];
+    // 🔍 TEMP DEBUG
+    console.log('[FrictionRadar] learners from API:', learners.map(l => ({
+      name: l.fullName,
+      analysis: l.analysis,
+      dominant: l.analysis?.dominantStruggle,
+    })));
+    const groups: Record<FrictionCategory | 'unclassified', ActivityLearner[]> = {
+      'No Understanding': [],
+      'No Interest': [],
+      'Not Engaging': [],
+      'No Time': [],
+      'unclassified': [],
+    };
+    learners.forEach(l => {
+      const dominant = l.analysis?.dominantStruggle;
+      if (dominant && dominant !== 'None' && dominant in groups) {
+        groups[dominant as FrictionCategory].push(l);
+      } else {
+        groups['unclassified'].push(l);
+      }
+    });
+    return groups;
+  }, [activityResponse]);
+
+  const totalFrictionLearners = useMemo(() => {
+    return FRICTION_CATEGORIES.reduce((sum, c) => sum + frictionGroups[c.key].length, 0);
+  }, [frictionGroups]);
 
   const {
     data: historyResponse,
@@ -1670,13 +1721,17 @@ export default function TutorDashboardPage() {
                       )}
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-slate-800">Alert Feed</h3>
+                      <h3 className="text-xl font-bold text-slate-800">
+                        {alertViewMode === 'radar' ? '📡 Friction Radar' : 'Alert Feed'}
+                      </h3>
                       <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                         {activityFetching ? (
                           <span className="flex items-center gap-2">
                             <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
                             Refreshing telemetry...
                           </span>
+                        ) : alertViewMode === 'radar' ? (
+                          `${totalFrictionLearners} learner${totalFrictionLearners !== 1 ? 's' : ''} classified by struggle type`
                         ) : (
                           'Auto-refreshes every 30 seconds'
                         )}
@@ -1684,44 +1739,77 @@ export default function TutorDashboardPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    {alertSelection.selectedEmails.size > 0 && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#2D3748] rounded-full shadow-lg animate-in slide-in-from-right-4 duration-300">
-                        <span className="text-[11px] font-bold text-white px-2 border-r border-slate-600">
-                          {alertSelection.selectedEmails.size} Selected
-                        </span>
-                        <div className="flex items-center gap-1 pl-1">
-                          <Button
-                            onClick={() => handleBulkEmail('alert')}
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-[10px] text-white hover:bg-white/10"
-                          >
-                            <Mail className="w-3.5 h-3.5 mr-1.5" />
-                            Email
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-[10px] text-white hover:bg-white/10"
-                            onClick={() => alertSelection.clearSelection()}
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200">
-                      <Checkbox
-                        id="select-all-alerts"
-                        checked={alertSelection.isAllSelected((activityResponse?.learners ?? []).map(l => l.email).filter((e): e is string => !!e))}
-                        onCheckedChange={() => alertSelection.toggleSelectAll((activityResponse?.learners ?? []).map(l => l.email).filter((e): e is string => !!e))}
-                        className="border-[#CBD5E0] shadow-sm data-[state=checked]:bg-[#3B82F6] data-[state=checked]:border-[#3B82F6]"
-                      />
-                      <label htmlFor="select-all-alerts" className="text-[11px] font-black uppercase tracking-wider text-slate-500 cursor-pointer select-none">
-                        Select All
-                      </label>
+                  <div className="flex items-center gap-3">
+                    {/* Friction Radar / All Alerts Toggle */}
+                    <div className="flex items-center bg-slate-100 rounded-xl p-1 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setAlertViewMode('all')}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${alertViewMode === 'all'
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                      >
+                        All Alerts
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAlertViewMode('radar')}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5 ${alertViewMode === 'radar'
+                          ? 'bg-white text-violet-700 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                      >
+                        📡 Friction Radar
+                        {totalFrictionLearners > 0 && (
+                          <span className="bg-violet-100 text-violet-700 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                            {totalFrictionLearners}
+                          </span>
+                        )}
+                      </button>
                     </div>
+
+                    {alertViewMode === 'all' && (
+                      <>
+                        {alertSelection.selectedEmails.size > 0 && (
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-[#2D3748] rounded-full shadow-lg animate-in slide-in-from-right-4 duration-300">
+                            <span className="text-[11px] font-bold text-white px-2 border-r border-slate-600">
+                              {alertSelection.selectedEmails.size} Selected
+                            </span>
+                            <div className="flex items-center gap-1 pl-1">
+                              <Button
+                                onClick={() => handleBulkEmail('alert')}
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-[10px] text-white hover:bg-white/10"
+                              >
+                                <Mail className="w-3.5 h-3.5 mr-1.5" />
+                                Email
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-[10px] text-white hover:bg-white/10"
+                                onClick={() => alertSelection.clearSelection()}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200">
+                          <Checkbox
+                            id="select-all-alerts"
+                            checked={alertSelection.isAllSelected((activityResponse?.learners ?? []).map(l => l.email).filter((e): e is string => !!e))}
+                            onCheckedChange={() => alertSelection.toggleSelectAll((activityResponse?.learners ?? []).map(l => l.email).filter((e): e is string => !!e))}
+                            className="border-[#CBD5E0] shadow-sm data-[state=checked]:bg-[#3B82F6] data-[state=checked]:border-[#3B82F6]"
+                          />
+                          <label htmlFor="select-all-alerts" className="text-[11px] font-black uppercase tracking-wider text-slate-500 cursor-pointer select-none">
+                            Select All
+                          </label>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1741,6 +1829,179 @@ export default function TutorDashboardPage() {
                         <Skeleton key={index} className="h-32 w-full rounded-2xl bg-slate-50 border border-slate-100" />
                       ))}
                     </div>
+
+                  ) : alertViewMode === 'radar' ? (
+                    /* ────────── FRICTION RADAR VIEW ────────── */
+                    <div className="space-y-3 pb-20">
+                      {FRICTION_CATEGORIES.map((cat) => {
+                        const groupLearners = frictionGroups[cat.key];
+                        return (
+                          <div
+                            key={cat.key}
+                            className="rounded-2xl border overflow-hidden"
+                            style={{ borderColor: cat.border }}
+                          >
+                            {/* Group Header */}
+                            <div
+                              className="flex items-center justify-between px-4 py-3"
+                              style={{ background: cat.bg }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-xl">{cat.icon}</span>
+                                <div>
+                                  <span className="text-[13px] font-black uppercase tracking-wider" style={{ color: cat.color }}>
+                                    {cat.key}
+                                  </span>
+                                  <span className="ml-2 text-[11px] font-bold text-slate-500">
+                                    · {groupLearners.length} learner{groupLearners.length !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                              </div>
+                              {groupLearners.length > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-[11px] font-bold hover:bg-white/60"
+                                  style={{ color: cat.color }}
+                                  onClick={() => {
+                                    const recipients = groupLearners
+                                      .map(l => ({
+                                        email: l.email || learnerDirectory.get(l.userId)?.email || '',
+                                        fullName: l.fullName || learnerDirectory.get(l.userId)?.fullName || 'Learner'
+                                      }))
+                                      .filter(r => r.email);
+                                    if (recipients.length > 0) handleOpenEmailModal(recipients);
+                                  }}
+                                >
+                                  <Mail className="w-3 h-3 mr-1" />
+                                  Email All
+                                </Button>
+                              )}
+                            </div>
+
+                            {/* Learner Rows */}
+                            {groupLearners.length === 0 ? (
+                              <div className="px-4 py-3 text-[13px] text-slate-400 bg-white flex items-center gap-2">
+                                <span className="text-green-500">✓</span> No learners in this category
+                              </div>
+                            ) : (
+                              <div className="divide-y divide-slate-100 bg-white">
+                                {groupLearners.map((learner) => {
+                                  const identity = {
+                                    fullName: learner.fullName || learnerDirectory.get(learner.userId)?.fullName || 'Anonymous Learner',
+                                    email: learner.email || learnerDirectory.get(learner.userId)?.email
+                                  };
+                                  const severity = learner.analysis?.severity ?? 'Low';
+                                  const hoursSince = Math.round(
+                                    (Date.now() - new Date(learner.createdAt).getTime()) / (1000 * 60 * 60)
+                                  );
+                                  const isActive = selectedLearnerId === learner.userId;
+                                  const initials = identity.fullName
+                                    .split(' ').filter(Boolean).slice(0, 2)
+                                    .map(w => w[0].toUpperCase()).join('');
+
+                                  const severityStyle = {
+                                    High: { bg: '#FEF2F2', text: '#DC2626', dot: '#EF4444' },
+                                    Medium: { bg: '#FFFBEB', text: '#D97706', dot: '#F59E0B' },
+                                    Low: { bg: '#F0FDF4', text: '#16A34A', dot: '#22C55E' },
+                                  }[severity];
+
+                                  return (
+                                    <div
+                                      key={learner.userId}
+                                      onClick={() => setSelectedLearnerId(isActive ? null : learner.userId)}
+                                      className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-all hover:bg-slate-50 ${isActive ? 'bg-violet-50 border-l-4 border-violet-400' : ''
+                                        }`}
+                                    >
+                                      {/* Avatar */}
+                                      <div
+                                        className="w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-black text-white shrink-0"
+                                        style={{ background: cat.color }}
+                                      >
+                                        {initials}
+                                      </div>
+
+                                      {/* Info */}
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-semibold text-[14px] text-slate-800 truncate">
+                                          {identity.fullName}
+                                        </div>
+                                        <div className="text-[11px] text-slate-400">{hoursSince}h ago</div>
+                                      </div>
+
+                                      {/* Severity Chip */}
+                                      <div
+                                        className="flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-black uppercase"
+                                        style={{ background: severityStyle.bg, color: severityStyle.text }}
+                                      >
+                                        <span
+                                          className="w-1.5 h-1.5 rounded-full"
+                                          style={{ background: severityStyle.dot }}
+                                        />
+                                        {severity}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Unclassified / Drifting Group */}
+                      {frictionGroups.unclassified.length > 0 && (
+                        <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                          <div className="flex items-center gap-2 px-4 py-3 bg-slate-50">
+                            <span className="text-xl">🟡</span>
+                            <span className="text-[13px] font-black uppercase tracking-wider text-slate-500">
+                              Drifting / No specific pattern
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-400">
+                              · {frictionGroups.unclassified.length} learner{frictionGroups.unclassified.length !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                          <div className="divide-y divide-slate-100 bg-white">
+                            {frictionGroups.unclassified.map((learner) => {
+                              const identity = {
+                                fullName: learner.fullName || learnerDirectory.get(learner.userId)?.fullName || 'Anonymous Learner',
+                                email: learner.email || learnerDirectory.get(learner.userId)?.email
+                              };
+                              const hoursSince = Math.round(
+                                (Date.now() - new Date(learner.createdAt).getTime()) / (1000 * 60 * 60)
+                              );
+                              const isActive = selectedLearnerId === learner.userId;
+                              const initials = identity.fullName
+                                .split(' ').filter(Boolean).slice(0, 2)
+                                .map(w => w[0].toUpperCase()).join('');
+                              const key = (learner.derivedStatus ?? 'unknown') as keyof typeof statusMeta;
+                              const meta = statusMeta[key];
+
+                              return (
+                                <div
+                                  key={learner.userId}
+                                  onClick={() => setSelectedLearnerId(isActive ? null : learner.userId)}
+                                  className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-all hover:bg-slate-50 ${isActive ? 'bg-blue-50 border-l-4 border-blue-400' : ''
+                                    }`}
+                                >
+                                  <div className="w-9 h-9 rounded-full bg-slate-400 flex items-center justify-center text-[12px] font-black text-white shrink-0">
+                                    {initials}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-[14px] text-slate-800 truncate">{identity.fullName}</div>
+                                    <div className="text-[11px] text-slate-400">{hoursSince}h ago</div>
+                                  </div>
+                                  <span className={`text-[10px] font-black px-2 py-1 rounded-full border ${meta?.badgeClass ?? ''}`}>
+                                    {meta?.label ?? 'UNKNOWN'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                   ) : filteredAlerts.length === 0 ? (
                     <div className="py-20 text-center bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center animate-in fade-in duration-500">
                       <div className="text-6xl mb-4">✅</div>
@@ -1961,6 +2222,47 @@ export default function TutorDashboardPage() {
                     ) : (
                       <div className="space-y-8">
 
+                        {/* FRICTION RADAR CHIP — show why this learner is struggling */}
+                        {selectedLearner?.analysis && selectedLearner.analysis.dominantStruggle !== 'None' && (() => {
+                          const a = selectedLearner.analysis!;
+                          const catMeta: Record<string, { icon: string; color: string; bg: string; border: string }> = {
+                            'No Understanding': { icon: '❓', color: '#7C3AED', bg: '#F5F3FF', border: '#C4B5FD' },
+                            'No Interest': { icon: '😴', color: '#DC2626', bg: '#FEF2F2', border: '#FCA5A5' },
+                            'Not Engaging': { icon: '😒', color: '#D97706', bg: '#FFFBEB', border: '#FCD34D' },
+                            'No Time': { icon: '⏰', color: '#2563EB', bg: '#EFF6FF', border: '#93C5FD' },
+                          };
+                          const cm = catMeta[a.dominantStruggle] ?? { icon: '📡', color: '#6B7280', bg: '#F9FAFB', border: '#E5E7EB' };
+                          const sevColor = { High: '#DC2626', Medium: '#D97706', Low: '#16A34A' }[a.severity];
+                          return (
+                            <div
+                              className="rounded-2xl border p-4 space-y-2"
+                              style={{ background: cm.bg, borderColor: cm.border }}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">{cm.icon}</span>
+                                  <span className="text-[13px] font-black uppercase tracking-wider" style={{ color: cm.color }}>
+                                    {a.dominantStruggle}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[11px] font-black uppercase" style={{ color: sevColor }}>
+                                  <span className="w-2 h-2 rounded-full" style={{ background: sevColor }} />
+                                  {a.severity}
+                                </div>
+                              </div>
+                              <p className="text-[12px] text-slate-600 leading-relaxed">{a.explanation}</p>
+                              {a.signals.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {a.signals.slice(0, 3).map((s, i) => (
+                                    <span key={i} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/70 border" style={{ borderColor: cm.border, color: cm.color }}>
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {/* TIMELINE */}
                         <div>
