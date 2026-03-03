@@ -3,6 +3,7 @@ import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { DASHBOARD_CARD_SHADOW, DASHBOARD_GRADIENT_BG, FONT_INTER_STACK } from "@/constants/theme";
 import { SiteHeader, type SiteHeaderProps } from "./SiteHeader";
+import { logoutAndRedirect } from "@/utils/session";
 
 interface SiteLayoutProps {
   children: ReactNode;
@@ -83,6 +84,7 @@ export function SiteLayout({
       ...headerProps,
       isAuthenticated: headerProps?.isAuthenticated ?? storedIsAuthenticated,
       user: headerProps?.user ?? storedUser,
+      onLogout: headerProps?.onLogout ?? (() => logoutAndRedirect("/")),
     };
   }, [headerProps, showHeader, storedIsAuthenticated, storedUser]);
 

@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Mail, Sparkles, Loader2, MessageSquare, ChevronDown, ChevronUp, Users, TrendingUp, Bell, Home, BookOpen, Activity, Zap, Filter, ListFilter, X, Check } from 'lucide-react';
+import { Mail, Sparkles, Loader2, MessageSquare, ChevronDown, ChevronUp, Users, TrendingUp, Bell, Home, BookOpen, Activity, Zap, Filter, ListFilter, X, Check, Plus } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -266,6 +266,13 @@ export default function TutorDashboardPage() {
       setSelectedCourseId(courses[0].courseId);
     }
   }, [courses, selectedCourseId]);
+
+  // Protect the dashboard: If a tutor has no active courses, redirect them to the submission wizard
+  useEffect(() => {
+    if (session?.role === 'tutor' && !coursesLoading && courses.length === 0) {
+      setLocation('/tutors/submit-course');
+    }
+  }, [session, coursesLoading, courses, setLocation]);
 
   useEffect(() => {
     setAssistantMessages([]);
@@ -932,7 +939,7 @@ export default function TutorDashboardPage() {
 
   if (!session) {
     return (
-      <SiteLayout>
+      <SiteLayout headerProps={{ onLogout: handleLogout }}>
         <div className="max-w-3xl mx-auto py-10 px-4 space-y-4">
           <Card>
             <CardHeader>
@@ -950,7 +957,7 @@ export default function TutorDashboardPage() {
 
   if (session.role !== 'tutor' && session.role !== 'admin') {
     return (
-      <SiteLayout>
+      <SiteLayout headerProps={{ onLogout: handleLogout }}>
         <div className="max-w-3xl mx-auto py-10 px-4 space-y-4">
           <Card>
             <CardHeader>
@@ -969,7 +976,7 @@ export default function TutorDashboardPage() {
   }
 
   return (
-    <SiteLayout>
+    <SiteLayout headerProps={{ onLogout: handleLogout }}>
       <div className="min-h-screen">
         <div className="w-full pb-16 pt-6 text-[#1A202C]">
           <section id="overview" className="mb-10">
@@ -1007,6 +1014,15 @@ export default function TutorDashboardPage() {
                         ))}
                       </SelectContent>
                     </Select>
+
+                    <Button 
+                      onClick={() => setLocation('/tutors/submit-course')}
+                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg px-6 flex items-center gap-2 h-[40px] shadow-sm hover:shadow-lg transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Submit New Course
+                    </Button>
+
                     <Button
                       variant="ghost"
                       className="text-[#EF4444] text-sm font-medium hover:text-[#DC2626] hover:underline px-4"

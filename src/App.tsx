@@ -13,12 +13,16 @@ import TutorLoginPage from "@/pages/TutorLoginPage";
 import CoursePlayerPage from "@/pages/CoursePlayerPage";
 import AssessmentPage from "@/pages/AssessmentPage";
 import EnrollmentPage from "@/pages/EnrollmentPage";
+import CourseSubmissionWizardPage from "@/pages/CourseSubmissionWizardPage";
+import CourseCreationPendingPage from "@/pages/CourseCreationPendingPage";
 function Router() {
   return (
     <Switch>
       {/* Tutor Routes Only */}
       <Route path="/become-a-tutor" component={BecomeTutorPage} />
       <Route path="/tutors/login" component={TutorLoginPage} />
+      <Route path="/tutors/submit-course" component={CourseSubmissionWizardPage} />
+      <Route path="/tutors/pending" component={CourseCreationPendingPage} />
       <Route path="/tutors" component={TutorDashboardPage} />
       <Route path="/tutor" component={TutorDashboardPage} />
 
