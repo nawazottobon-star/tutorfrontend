@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
-import { writeStoredSession, resetSessionHeartbeat } from '@/utils/session';
+import { writeStoredSession, resetSessionHeartbeat, getAuthHeaders } from '@/utils/session';
 import type { StoredSession } from '@/types/session';
 import { SiteLayout } from '@/components/layout/SiteLayout';
 
@@ -53,7 +53,38 @@ export default function TutorLoginPage() {
       );
       localStorage.setItem('isAuthenticated', 'true');
       toast({ title: 'Welcome back', description: 'Tutor session active' });
-      setLocation('/tutors');
+
+      // Check if tutor has courses or submissions
+      try {
+        // Use the token from payload directly to ensure we don't depend on storage sync timing
+        const token = payload.session?.accessToken;
+        const currentHeaders = { 
+          headers: new Headers({ 'Authorization': `Bearer ${token}` }) 
+        };
+
+        const hasCoursesResponse = await apiRequest('GET', '/api/tutors/me/has-courses', undefined, currentHeaders);
+        const { hasCourses } = await hasCoursesResponse.json();
+
+        if (hasCourses) {
+          setLocation('/tutors');
+        } else {
+          // If no active courses, check if they have a submission pending
+          const subsResponse = await apiRequest('GET', '/api/course-submissions/me', undefined, currentHeaders);
+          const { submissions } = await subsResponse.json();
+
+          if (submissions && submissions.length > 0) {
+            // If they have submissions, they go to the submission page to see status
+            setLocation('/tutors/submit-course');
+          } else {
+            // Fresh tutor, go to submission wizard
+            setLocation('/tutors/submit-course');
+          }
+        }
+      } catch (checkError) {
+        console.error('Status check failed', checkError);
+        // If checks fail, default to /tutors - the dashboard protection will redirect back if needed
+        setLocation('/tutors');
+      }
     } catch (error: any) {
       toast({
         variant: 'destructive',

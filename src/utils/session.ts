@@ -1,5 +1,6 @@
 import { buildApiUrl } from '@/lib/api';
 import type { StoredSession } from '@/types/session';
+import { queryClient } from '@/lib/queryClient';
 
 const STORAGE_KEY = 'session';
 const USER_KEY = 'user';
@@ -38,6 +39,17 @@ export const clearStoredSession = (): void => {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(USER_KEY);
   localStorage.setItem(AUTH_FLAG_KEY, 'false');
+  // Clear TanStack Query cache to avoid stale data between user logins
+  queryClient.clear();
+};
+
+export const getAuthHeaders = (): Headers => {
+  const session = readStoredSession();
+  const headers = new Headers();
+  if (session?.accessToken) {
+    headers.set('Authorization', `Bearer ${session.accessToken}`);
+  }
+  return headers;
 };
 
 export const shouldRefreshAccessToken = (session: StoredSession, bufferMs = REFRESH_BUFFER_MS): boolean => {

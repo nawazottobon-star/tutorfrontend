@@ -175,8 +175,16 @@ export function SiteHeader({
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  className="flex items-center gap-2 text-destructive focus:text-destructive"
-                  onSelect={onLogout}
+                  className="flex items-center gap-2 text-destructive focus:text-destructive cursor-pointer"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    if (onLogout) {
+                      onLogout();
+                    } else {
+                      // Fallback if prop not provided
+                      window.location.href = '/';
+                    }
+                  }}
                 >
                   <LogOut className="h-4 w-4" />
                   Logout
@@ -243,7 +251,13 @@ export function SiteHeader({
               <Button
                 variant="ghost"
                 className="mt-2 justify-start gap-2 p-0 text-destructive hover:bg-transparent hover:text-destructive"
-                onClick={onLogout}
+                onClick={() => {
+                  if (onLogout) {
+                    onLogout();
+                  } else {
+                    window.location.href = '/';
+                  }
+                }}
               >
                 <LogOut className="h-4 w-4" />
                 Logout
