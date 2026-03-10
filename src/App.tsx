@@ -10,11 +10,11 @@ import NotFound from "@/pages/not-found";
 import BecomeTutorPage from "@/pages/BecomeTutorPage";
 import TutorDashboardPage from "@/pages/TutorDashboardPage";
 import TutorLoginPage from "@/pages/TutorLoginPage";
-import CoursePlayerPage from "@/pages/CoursePlayerPage";
-import AssessmentPage from "@/pages/AssessmentPage";
-import EnrollmentPage from "@/pages/EnrollmentPage";
 import CourseSubmissionWizardPage from "@/pages/CourseSubmissionWizardPage";
 import CourseCreationPendingPage from "@/pages/CourseCreationPendingPage";
+import WorkshopCreatePage from "@/pages/WorkshopCreatePage";
+import WorkshopDetailPage from "@/pages/WorkshopDetailPage";
+
 function Router() {
   return (
     <Switch>
@@ -25,11 +25,8 @@ function Router() {
       <Route path="/tutors/pending" component={CourseCreationPendingPage} />
       <Route path="/tutors" component={TutorDashboardPage} />
       <Route path="/tutor" component={TutorDashboardPage} />
-
-      {/* Learner Routes */}
-      <Route path="/course/:courseId/learn/:lessonSlug" component={CoursePlayerPage} />
-      <Route path="/assessment" component={AssessmentPage} />
-      <Route path="/enroll" component={EnrollmentPage} />
+      <Route path="/tutors/workshops/create" component={WorkshopCreatePage} />
+      <Route path="/tutors/workshops/:id" component={WorkshopDetailPage} />
 
       {/* Default route - Tutor Landing Page */}
       <Route path="/" component={BecomeTutorPage} />

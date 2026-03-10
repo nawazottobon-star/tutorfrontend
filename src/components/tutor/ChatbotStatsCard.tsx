@@ -9,8 +9,76 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { MessageSquare, HelpCircle, Lightbulb } from 'lucide-react';
-import { fetchChatbotStats, fetchQuestionAnalysis } from '@/lib/chatbotStatsService';
-import type { ChatbotModuleStats, QuestionAnalysis } from '@/lib/chatbotStatsService';
+import { buildApiUrl } from '@/lib/api';
+
+const getLocalToken = () => {
+    try {
+        const stored = localStorage.getItem('session');
+        const session = stored ? JSON.parse(stored) : null;
+        return session?.state?.session?.accessToken;
+    } catch {
+        return null;
+    }
+};
+
+type TopicStats = {
+    topicId: string;
+    topicName: string;
+    sessionCount: number;
+    messageCount: number;
+};
+
+export type ChatbotModuleStats = {
+    moduleNo: number;
+    moduleName: string;
+    topics: TopicStats[];
+};
+
+export type QuestionAnalysis = {
+    totalQuestions: number;
+    predefinedQuestions: number;
+    customQuestions: number;
+    predefinedPercentage: number;
+    customPercentage: number;
+};
+
+// Internal fetchers replacing the missing lib hooks
+async function fetchChatbotStats(courseId: string, cohortId?: string, topicId?: string, headers?: Headers) {
+    const token = getLocalToken();
+    const headersList: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+    if (headers) {
+        headers.forEach((value, key) => headersList[key] = value);
+    }
+
+    const query = new URLSearchParams();
+    query.set('courseId', courseId);
+    if (cohortId) query.set('cohortId', cohortId);
+    if (topicId) query.set('topicId', topicId);
+
+    const res = await fetch(buildApiUrl(`/api/tutor/chatbot/stats?${query.toString()}`), { headers: headersList });
+    if (!res.ok) throw new Error('Failed to fetch stats');
+    return res.json() as Promise<ChatbotModuleStats[]>;
+}
+
+async function fetchQuestionAnalysis(courseId: string, cohortId?: string, topicId?: string, timeframe?: string, headers?: Headers) {
+    const token = getLocalToken();
+    const headersList: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+    if (headers) {
+        headers.forEach((value, key) => headersList[key] = value);
+    }
+
+    const query = new URLSearchParams();
+    query.set('courseId', courseId);
+    if (cohortId) query.set('cohortId', cohortId);
+    if (topicId) query.set('topicId', topicId);
+    if (timeframe) query.set('timeframe', timeframe);
+
+    const res = await fetch(buildApiUrl(`/api/tutor/chatbot/analysis?${query.toString()}`), { headers: headersList });
+    if (!res.ok) throw new Error('Failed to fetch analysis');
+    return res.json() as Promise<QuestionAnalysis>;
+}
 
 interface ChatbotStatsCardProps {
     courseId: string;
@@ -47,12 +115,12 @@ export function ChatbotStatsCard({ courseId, cohortId, headers }: ChatbotStatsCa
         statsLength: stats?.length
     });
 
-    const totalSessions = stats?.reduce((sum, module) =>
-        sum + module.topics.reduce((topicSum, topic) => topicSum + topic.sessionCount, 0), 0
+    const totalSessions = stats?.reduce((sum: number, module: any) =>
+        sum + module.topics.reduce((topicSum: number, topic: any) => topicSum + topic.sessionCount, 0), 0
     ) || 0;
 
-    const totalMessages = stats?.reduce((sum, module) =>
-        sum + module.topics.reduce((topicSum, topic) => topicSum + topic.messageCount, 0), 0
+    const totalMessages = stats?.reduce((sum: number, module: any) =>
+        sum + module.topics.reduce((topicSum: number, topic: any) => topicSum + topic.messageCount, 0), 0
     ) || 0;
 
     if (statsLoading || analysisLoading) {
@@ -147,11 +215,11 @@ export function ChatbotStatsCard({ courseId, cohortId, headers }: ChatbotStatsCa
                                         Module {module.moduleNo}: {module.moduleName}
                                     </h4>
                                     <span className="text-xs text-[#718096]">
-                                        {module.topics.reduce((sum, t) => sum + t.sessionCount, 0)} sessions
+                                        {module.topics.reduce((sum: number, t: any) => sum + t.sessionCount, 0)} sessions
                                     </span>
                                 </div>
                                 <div className="space-y-1.5">
-                                    {module.topics.map((topic) => (
+                                    {module.topics.map((topic: any) => (
                                         <div key={topic.topicId} className="flex items-center justify-between text-xs">
                                             <span className="text-[#4A5568] truncate flex-1">{topic.topicName}</span>
                                             <div className="flex items-center gap-3 ml-2 shrink-0">

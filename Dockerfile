@@ -17,11 +17,9 @@ RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 COPY . .
 
 # Build arguments for environment variables (passed at build time)
-ARG VITE_API_BASE_URL
 ARG VITE_GOOGLE_CLIENT_ID
 
 # Set environment variables for the build
-ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
 ENV NODE_ENV=production
 

@@ -90,6 +90,7 @@ export default function ChatBot({ courseName, courseId }: ChatBotProps) {
       }
 
       const answer = await requestAssistantAnswer({
+        question: inputValue.trim(),
         courseId,
         courseName,
         accessToken: freshSession.accessToken,
@@ -229,6 +230,8 @@ export default function ChatBot({ courseName, courseId }: ChatBotProps) {
 async function requestAssistantAnswer(params: {
   question: string;
   accessToken: string;
+  courseId?: string;
+  courseName?: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 }): Promise<string> {
   if (!params.courseId) {

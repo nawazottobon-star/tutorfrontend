@@ -16,7 +16,34 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Mail, Sparkles, Loader2, MessageSquare, ChevronDown, ChevronUp, Users, TrendingUp, Bell, Home, BookOpen, Activity, Zap, Filter, ListFilter, X, Check, Plus } from 'lucide-react';
+import {
+  Mail,
+  Sparkles,
+  Loader2,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp,
+  Users,
+  TrendingUp,
+  Bell,
+  Home,
+  BookOpen,
+  Activity,
+  Zap,
+  Filter,
+  ListFilter,
+  X,
+  Check,
+  Plus,
+  Video,
+  Clock,
+  IndianRupee,
+  Minus,
+  GraduationCap,
+  Calendar,
+  ExternalLink,
+  ClipboardList
+} from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -176,6 +203,34 @@ const NumberTicker = ({ value, suffix = "" }: { value: number; suffix?: string }
   return <span>{displayValue}{suffix}</span>;
 };
 
+interface WorkshopOffering {
+  offeringId: string;
+  title: string;
+  description: string;
+  isActive: boolean;
+}
+
+interface Workshop {
+  workshopId: string;
+  offeringId: string;
+  tutorId: string;
+  googleMeetLink: string;
+  maxSeats: number | null;
+  createdAt: string;
+  offering: {
+    title: string;
+    description: string;
+    isActive: boolean;
+    _count: {
+      registrations: number;
+    };
+    workshopSessions: Array<{
+      scheduledAt: string;
+      sessionNo: number;
+    }>;
+  };
+}
+
 export default function TutorDashboardPage() {
   const session = readStoredSession();
   const { toast } = useToast();
@@ -247,14 +302,30 @@ export default function TutorDashboardPage() {
     return h;
   }, [session?.accessToken]);
 
+  const isTutorOrAdmin = session?.role === 'tutor' || session?.role === 'admin';
+
   const {
     data: coursesResponse,
-    isLoading: coursesLoading
+    isLoading: coursesLoading,
+    isFetched: coursesFetched,
+    error: coursesError
   } = useQuery<{ courses: TutorCourse[] }>({
     queryKey: ['tutor-courses'],
-    enabled: session?.role === 'tutor' || session?.role === 'admin',
+    enabled: isTutorOrAdmin,
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/tutors/me/courses', undefined, headers ? { headers } : undefined);
+      return response.json();
+    }
+  });
+
+  const {
+    data: workshopsResponse,
+    isLoading: workshopsLoading
+  } = useQuery<{ workshops: Workshop[] }>({
+    queryKey: ['tutor-workshops'],
+    enabled: isTutorOrAdmin && !!session,
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/workshops', undefined, headers ? { headers } : undefined);
       return response.json();
     }
   });
@@ -267,12 +338,22 @@ export default function TutorDashboardPage() {
     }
   }, [courses, selectedCourseId]);
 
-  // Protect the dashboard: If a tutor has no active courses, redirect them to the submission wizard
+  // Protect the dashboard: If a tutor has no active courses, redirect them to the submission wizard.
+  // IMPORTANT: Only redirect after the query was actually enabled AND has finished fetching.
+  // Without `coursesFetched`, this fires immediately when the session/role hasn't loaded yet
+  // (because the query is disabled, coursesLoading stays false, courses stays []).
   useEffect(() => {
-    if (session?.role === 'tutor' && !coursesLoading && courses.length === 0) {
+    if (
+      session?.role === 'tutor' &&
+      isTutorOrAdmin &&
+      coursesFetched &&
+      !coursesLoading &&
+      !coursesError &&
+      courses.length === 0
+    ) {
       setLocation('/tutors/submit-course');
     }
-  }, [session, coursesLoading, courses, setLocation]);
+  }, [session, isTutorOrAdmin, coursesFetched, coursesLoading, coursesError, courses, setLocation]);
 
   useEffect(() => {
     setAssistantMessages([]);
@@ -883,7 +964,8 @@ export default function TutorDashboardPage() {
     { id: 'overview', label: 'Command Center', icon: Home },
     { id: 'classroom', label: 'Classroom', icon: BookOpen },
     { id: 'monitoring', label: 'Live Monitor', icon: Activity },
-    { id: 'copilot', label: 'AI Copilot', icon: Zap }
+    { id: 'copilot', label: 'AI Copilot', icon: Zap },
+    { id: 'workshops', label: 'Workshops', icon: GraduationCap, isNew: true }
   ];
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -1015,7 +1097,7 @@ export default function TutorDashboardPage() {
                       </SelectContent>
                     </Select>
 
-                    <Button 
+                    <Button
                       onClick={() => setLocation('/tutors/submit-course')}
                       className="bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg px-6 flex items-center gap-2 h-[40px] shadow-sm hover:shadow-lg transition-all"
                     >
@@ -1088,11 +1170,12 @@ export default function TutorDashboardPage() {
             </div>
           </section>
 
-          {/* Modern Pill Navigation */}
-          <nav className="mt-8 inline-flex bg-[#F9FAFB] p-2 rounded-xl gap-2" aria-label="Tutor sections">
+          <nav className="mt-8 inline-flex bg-white/80 p-2 rounded-2xl gap-2 shadow-sm border border-slate-100/50 backdrop-blur-md" aria-label="Tutor sections">
             {navItems.map((item) => {
               const ItemIcon = item.icon;
               const isActive = activeTab === item.id;
+              const isWorkshops = item.id === 'workshops';
+
               return (
                 <button
                   type="button"
@@ -1101,11 +1184,24 @@ export default function TutorDashboardPage() {
                     setActiveTab(item.id);
                     handleSectionNav(item.id);
                   }}
-                  className={`tab-transition rounded-full px-6 py-3 text-sm font-medium flex items-center gap-2 ${isActive ? 'tab-pill-active' : 'tab-pill-inactive'
+                  className={`tab-transition relative rounded-full px-6 py-3 text-sm font-black flex items-center gap-2 transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] ${isActive
+                    ? (isWorkshops ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-200' : 'tab-pill-active')
+                    : 'tab-pill-inactive hover:bg-slate-100 hover:text-slate-800'
                     }`}
                 >
-                  <ItemIcon className="w-4 h-4" />
+                  <ItemIcon className={`w-4 h-4 ${isActive ? 'text-white' : (isWorkshops ? 'text-indigo-500' : 'text-slate-500')}`} />
                   {item.label}
+
+                  {item.isNew && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-[32px] items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-black uppercase tracking-tighter text-white shadow-md ring-2 ring-white animate-bounce">
+                      New
+                      <span className="absolute h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
+                    </span>
+                  )}
+
+                  {!isActive && isWorkshops && (
+                    <div className="flex h-1.5 w-1.5 rounded-full bg-indigo-500 ml-1 pulse-alert" />
+                  )}
                 </button>
               );
             })}
@@ -2341,6 +2437,98 @@ export default function TutorDashboardPage() {
             </div>
           </section>
 
+          {/* Workshops Section */}
+          <section id="workshops" className="mt-8 space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[1.5px] text-indigo-400">WORKSHOPS</p>
+                  <span className="bg-indigo-50 text-indigo-500 text-[8px] font-black uppercase px-2 py-0.5 rounded-full border border-indigo-100">Special Feature</span>
+                </div>
+                <h2 className="text-[28px] font-black text-slate-800 mb-2 tracking-tight">Live Workshops</h2>
+                <div className="h-[3px] w-[60px] bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full mb-3 shadow-sm shadow-indigo-100"></div>
+                <p className="text-[15px] text-slate-500 font-medium">Design premium live sessions and manage high-intent learner registrations.</p>
+              </div>
+              <Button
+                onClick={() => setLocation('/tutors/workshops/create')}
+                className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-black rounded-xl px-6 flex items-center gap-2 h-12 shadow-lg shadow-indigo-100 hover:shadow-indigo-200 hover:-translate-y-0.5 transition-all duration-300"
+              >
+                <Sparkles className="w-4 h-4" />
+                Conduct a Workshop
+              </Button>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {workshopsLoading ? (
+                Array(3).fill(0).map((_, i) => (
+                  <Card key={i} className="animate-pulse border-[#E5E7EB] bg-white h-[200px]" />
+                ))
+              ) : (workshopsResponse?.workshops ?? []).length === 0 ? (
+                <Card className="col-span-full py-16 flex flex-col items-center justify-center border-2 border-dashed border-[#E5E7EB] bg-white rounded-2xl">
+                  <div className="bg-[#F3F4F6] w-16 h-16 rounded-full flex items-center justify-center mb-4 text-[#9CA3AF]">
+                    <GraduationCap className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-[#1F2937] font-bold text-xl">No workshops conducted yet.</h3>
+                  <p className="text-[#6B7280] text-sm mt-2 max-w-[300px] text-center">
+                    Share your expertise by conducting a live session. Start by creating your first workshop!
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="mt-6 border-[#3B82F6] text-[#3B82F6] hover:bg-blue-50"
+                    onClick={() => setLocation('/tutors/workshops/create')}
+                  >
+                    Start your first workshop
+                  </Button>
+                </Card>
+              ) : (
+                (workshopsResponse?.workshops ?? []).map((workshop: any) => (
+                  <Card
+                    key={workshop.workshopId}
+                    onClick={() => setLocation(`/tutors/workshops/${workshop.workshopId}`)}
+                    className="border border-[#E5E7EB] bg-white group cursor-pointer hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col"
+                  >
+                    <div className="p-6 flex-1">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="bg-[#EBF5FF] p-2 rounded-lg text-[#3B82F6]">
+                          <GraduationCap className="w-5 h-5" />
+                        </div>
+                        {workshop.offering._count.registrations > 0 && (
+                          <Badge className="bg-[#FFF7ED] text-[#EA580C] border-[#FFEDD5] text-[10px] font-bold">
+                            {workshop.offering._count.registrations} Leads
+                          </Badge>
+                        )}
+                      </div>
+                      <h3 className="text-lg font-bold text-[#1F2937] line-clamp-2 min-h-[3.5rem] group-hover:text-[#3B82F6] transition-colors mb-2">
+                        {workshop.offering.title}
+                      </h3>
+                      <div className="flex flex-col gap-2.5 mt-4">
+                        <div className="flex items-center gap-2 text-[#6B7280]">
+                          <Calendar className="w-4 h-4 text-[#3B82F6]" />
+                          <span className="text-[13px] font-medium font-sans">
+                            {workshop.offering.workshopSessions[0]
+                              ? new Date(workshop.offering.workshopSessions[0].scheduledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                              : 'Not scheduled'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[#6B7280]">
+                          <Users className="w-4 h-4 text-[#3B82F6]" />
+                          <span className="text-[13px] font-medium">
+                            {workshop.maxSeats ? `${workshop.maxSeats} seats max` : 'Unlimited seats'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-4 border-t border-[#F3F4F6] bg-[#F9FAFB] flex items-center justify-between group-hover:bg-[#F3F4F6] transition-colors">
+                      <div className="text-[12px] font-bold text-[#3B82F6] flex items-center gap-1">
+                        View Details <ExternalLink className="w-3 h-3" />
+                      </div>
+                    </div>
+                  </Card>
+                ))
+              )}
+            </div>
+          </section>
+
           {/* Chatbot Interaction Stats Section */}
           <section id="chatbot-stats" className="mt-8 space-y-4">
             <div>
@@ -2363,244 +2551,242 @@ export default function TutorDashboardPage() {
               cohortId={selectedCohortId}
               headers={headers}
             />
-
-
           </section>
-        </div >
 
-        {/* Persistent AI Copilot Button - Anchored horizontally to white surface, fixed to viewport bottom */}
-        {
-          !isAssistantSheetOpen && (
-            <div className="fixed inset-x-0 bottom-6 z-50 pointer-events-none">
-              <div className="mx-auto max-w-[96%] px-6 sm:px-10 flex justify-end">
-                <motion.div
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  className="pointer-events-auto"
-                >
+          {/* Persistent AI Copilot Button - Anchored horizontally to white surface, fixed to viewport bottom */}
+          {
+            !isAssistantSheetOpen && (
+              <div className="fixed inset-x-0 bottom-6 z-50 pointer-events-none">
+                <div className="mx-auto max-w-[96%] px-6 sm:px-10 flex justify-end">
                   <motion.div
-                    animate={{
-                      boxShadow: [
-                        "0 0 0 0px rgba(16, 185, 129, 0)",
-                        "0 0 0 10px rgba(16, 185, 129, 0.2)",
-                        "0 0 0 0px rgba(16, 185, 129, 0)"
-                      ]
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                    className="rounded-full"
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="pointer-events-auto"
                   >
-                    <Button
-                      onClick={() => setIsAssistantSheetOpen(true)}
-                      className="h-12 px-6 rounded-full bg-[#2D3748] hover:bg-[#1A202C] text-white shadow-xl flex items-center gap-2 group transition-all hover:scale-105 active:scale-95"
+                    <motion.div
+                      animate={{
+                        boxShadow: [
+                          "0 0 0 0px rgba(16, 185, 129, 0)",
+                          "0 0 0 10px rgba(16, 185, 129, 0.2)",
+                          "0 0 0 0px rgba(16, 185, 129, 0)"
+                        ]
+                      }}
+                      transition={{
+                        duration: 2,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                      }}
+                      className="rounded-full"
                     >
-                      <Sparkles className="w-4 h-4 group-hover:rotate-12 transition-transform" />
-                      <span className="font-semibold tracking-tight text-sm">AI Copilot</span>
-                    </Button>
+                      <Button
+                        onClick={() => setIsAssistantSheetOpen(true)}
+                        className="h-12 px-6 rounded-full bg-[#2D3748] hover:bg-[#1A202C] text-white shadow-xl flex items-center gap-2 group transition-all hover:scale-105 active:scale-95"
+                      >
+                        <Sparkles className="w-4 h-4 group-hover:rotate-12 transition-transform" />
+                        <span className="font-semibold tracking-tight text-sm">AI Copilot</span>
+                      </Button>
+                    </motion.div>
                   </motion.div>
-                </motion.div>
-              </div>
-            </div>
-          )
-        }
-
-        {/* AI Copilot Side Panel (Sheet) */}
-        <Sheet open={isAssistantSheetOpen} onOpenChange={setIsAssistantSheetOpen}>
-          <SheetContent side="right" className="w-full sm:max-w-[400px] md:max-w-[450px] p-0 border-l border-slate-200 bg-white flex flex-col">
-            <SheetHeader className="p-6 border-b border-slate-200">
-              <div className="flex items-center gap-2 text-emerald-600 mb-1">
-                <Sparkles className="w-4 h-4" />
-                <p className="text-[10px] uppercase tracking-[0.3em] font-bold">AI Copilot</p>
-              </div>
-              <SheetTitle className="text-xl font-bold text-slate-900">Classroom Analyst</SheetTitle>
-            </SheetHeader>
-
-            {/* Quick Suggestions */}
-            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-3">Quick Suggestions</p>
-              <div className="flex flex-col gap-2">
-                {QUICK_PROMPTS.map((prompt, i) => (
-                  <button
-                    key={i}
-                    onClick={() => performAssistantQuery(prompt)}
-                    className="text-left text-sm p-3 rounded-xl border-2 border-emerald-100 bg-white hover:border-emerald-500 hover:bg-emerald-50/50 transition-all text-slate-700 hover:text-emerald-700 font-medium shadow-sm"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div
-              ref={assistantChatRef}
-              className="flex-1 overflow-y-auto p-6 space-y-4"
-            >
-              {assistantMessages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-60">
-                  <div className="p-4 rounded-full bg-slate-100">
-                    <MessageSquare className="w-8 h-8 text-slate-400" />
-                  </div>
-                  <p className="text-sm text-slate-500 max-w-[200px]">
-                    Ask about enrollments, stuck learners, or classroom engagement.
-                  </p>
                 </div>
-              ) : (
-                assistantMessages.map((message, idx) => (
-                  <div
-                    key={message.id}
-                    ref={idx === assistantMessages.length - 1 ? lastMessageRef : null}
-                    className={`flex flex-col ${message.role === 'assistant' ? 'items-start' : 'items-end'}`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${message.role === 'assistant'
-                        ? 'bg-slate-100 text-slate-900 rounded-tl-none'
-                        : 'bg-emerald-600 text-white rounded-tr-none shadow-md shadow-emerald-600/20'
-                        }`}
+              </div>
+            )
+          }
+
+          {/* AI Copilot Side Panel (Sheet) */}
+          <Sheet open={isAssistantSheetOpen} onOpenChange={setIsAssistantSheetOpen}>
+            <SheetContent side="right" className="w-full sm:max-w-[400px] md:max-w-[450px] p-0 border-l border-slate-200 bg-white flex flex-col">
+              <SheetHeader className="p-6 border-b border-slate-200">
+                <div className="flex items-center gap-2 text-emerald-600 mb-1">
+                  <Sparkles className="w-4 h-4" />
+                  <p className="text-[10px] uppercase tracking-[0.3em] font-bold">AI Copilot</p>
+                </div>
+                <SheetTitle className="text-xl font-bold text-slate-900">Classroom Analyst</SheetTitle>
+              </SheetHeader>
+
+              {/* Quick Suggestions */}
+              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-3">Quick Suggestions</p>
+                <div className="flex flex-col gap-2">
+                  {QUICK_PROMPTS.map((prompt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => performAssistantQuery(prompt)}
+                      className="text-left text-sm p-3 rounded-xl border-2 border-emerald-100 bg-white hover:border-emerald-500 hover:bg-emerald-50/50 transition-all text-slate-700 hover:text-emerald-700 font-medium shadow-sm"
                     >
-                      <p className="text-[9px] uppercase tracking-wider opacity-60 font-bold mb-1">
-                        {message.role === 'assistant' ? 'Copilot' : 'You'}
-                      </p>
-                      <div className="leading-relaxed assistant-markdown">
-                        {message.role === 'assistant' ? (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {message.content}
-                          </ReactMarkdown>
-                        ) : (
-                          message.content
-                        )}
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div
+                ref={assistantChatRef}
+                className="flex-1 overflow-y-auto p-6 space-y-4"
+              >
+                {assistantMessages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-60">
+                    <div className="p-4 rounded-full bg-slate-100">
+                      <MessageSquare className="w-8 h-8 text-slate-400" />
+                    </div>
+                    <p className="text-sm text-slate-500 max-w-[200px]">
+                      Ask about enrollments, stuck learners, or classroom engagement.
+                    </p>
+                  </div>
+                ) : (
+                  assistantMessages.map((message, idx) => (
+                    <div
+                      key={message.id}
+                      ref={idx === assistantMessages.length - 1 ? lastMessageRef : null}
+                      className={`flex flex-col ${message.role === 'assistant' ? 'items-start' : 'items-end'}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${message.role === 'assistant'
+                          ? 'bg-slate-100 text-slate-900 rounded-tl-none'
+                          : 'bg-emerald-600 text-white rounded-tr-none shadow-md shadow-emerald-600/20'
+                          }`}
+                      >
+                        <p className="text-[9px] uppercase tracking-wider opacity-60 font-bold mb-1">
+                          {message.role === 'assistant' ? 'Copilot' : 'You'}
+                        </p>
+                        <div className="leading-relaxed assistant-markdown">
+                          {message.role === 'assistant' ? (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.content}
+                            </ReactMarkdown>
+                          ) : (
+                            message.content
+                          )}
+                        </div>
                       </div>
                     </div>
+                  ))
+                )}
+                {assistantLoading && (
+                  <div className="flex items-start">
+                    <div className="bg-slate-100 text-slate-900 rounded-2xl rounded-tl-none px-4 py-3 text-sm flex items-center gap-2">
+                      <Loader2 className="w-3 h-3 animate-spin opacity-60" />
+                      <span className="text-xs font-medium opacity-60">Analysing classroom data...</span>
+                    </div>
                   </div>
-                ))
-              )}
-              {assistantLoading && (
-                <div className="flex items-start">
-                  <div className="bg-slate-100 text-slate-900 rounded-2xl rounded-tl-none px-4 py-3 text-sm flex items-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin opacity-60" />
-                    <span className="text-xs font-medium opacity-60">Analysing classroom data...</span>
-                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t border-[#EDF2F7] bg-white">
+                <form onSubmit={handleAssistantSubmit} className="flex flex-row flex-nowrap items-center gap-2">
+                  <Input
+                    value={assistantInput}
+                    onChange={(event) => setAssistantInput(event.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAssistantSubmit(e as any);
+                      }
+                    }}
+                    placeholder="Ask about learners..."
+                    disabled={!selectedCourseId}
+                    className="flex-1 border-[#E2E8F0] focus:border-[#2D3748] bg-white text-[#1A202C] placeholder:text-[#A0AEC0] rounded-xl h-11"
+                  />
+                  <Button
+                    type="submit"
+                    disabled={!selectedCourseId || assistantLoading || !assistantInput.trim()}
+                    className="bg-[#2D3748] text-white hover:bg-[#1A202C] shadow-sm rounded-xl px-4 h-11 shrink-0 font-bold whitespace-nowrap"
+                  >
+                    {assistantLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Ask'}
+                  </Button>
+                </form>
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          <Dialog open={isEmailModalOpen} onOpenChange={setIsEmailModalOpen}>
+            <DialogContent className="sm:max-w-[500px] border-slate-200 bg-white">
+              <DialogHeader>
+                <DialogTitle className="text-slate-900">Email Student</DialogTitle>
+                <DialogDescription className="text-slate-600">
+                  Send a direct message to {emailFormData.fullName}.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSendEmail} className="space-y-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="to" className="text-slate-700">To</Label>
+                  <Input
+                    id="to"
+                    value={Array.isArray(emailFormData.to) ? emailFormData.to.join(', ') : emailFormData.to}
+                    disabled
+                    className="bg-slate-50 text-xs"
+                  />
                 </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-[#EDF2F7] bg-white">
-              <form onSubmit={handleAssistantSubmit} className="flex flex-row flex-nowrap items-center gap-2">
-                <Input
-                  value={assistantInput}
-                  onChange={(event) => setAssistantInput(event.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAssistantSubmit(e as any);
-                    }
-                  }}
-                  placeholder="Ask about learners..."
-                  disabled={!selectedCourseId}
-                  className="flex-1 border-[#E2E8F0] focus:border-[#2D3748] bg-white text-[#1A202C] placeholder:text-[#A0AEC0] rounded-xl h-11"
-                />
-                <Button
-                  type="submit"
-                  disabled={!selectedCourseId || assistantLoading || !assistantInput.trim()}
-                  className="bg-[#2D3748] text-white hover:bg-[#1A202C] shadow-sm rounded-xl px-4 h-11 shrink-0 font-bold whitespace-nowrap"
-                >
-                  {assistantLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Ask'}
-                </Button>
-              </form>
-            </div>
-          </SheetContent>
-        </Sheet>
-
-        <Dialog open={isEmailModalOpen} onOpenChange={setIsEmailModalOpen}>
-          <DialogContent className="sm:max-w-[500px] border-slate-200 bg-white">
-            <DialogHeader>
-              <DialogTitle className="text-slate-900">Email Student</DialogTitle>
-              <DialogDescription className="text-slate-600">
-                Send a direct message to {emailFormData.fullName}.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleSendEmail} className="space-y-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="to" className="text-slate-700">To</Label>
-                <Input
-                  id="to"
-                  value={Array.isArray(emailFormData.to) ? emailFormData.to.join(', ') : emailFormData.to}
-                  disabled
-                  className="bg-slate-50 text-xs"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="subject" className="text-slate-700">Subject</Label>
-                <Input
-                  id="subject"
-                  required
-                  value={emailFormData.subject}
-                  onChange={(e) => setEmailFormData({ ...emailFormData, subject: e.target.value })}
-                  placeholder="e.g. Feedback on your recent module"
-                  className="border-slate-300"
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="message" className="text-slate-700">Message</Label>
+                <div className="grid gap-2">
+                  <Label htmlFor="subject" className="text-slate-700">Subject</Label>
+                  <Input
+                    id="subject"
+                    required
+                    value={emailFormData.subject}
+                    onChange={(e) => setEmailFormData({ ...emailFormData, subject: e.target.value })}
+                    placeholder="e.g. Feedback on your recent module"
+                    className="border-slate-300"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="message" className="text-slate-700">Message</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleImproveEmail}
+                      disabled={!emailFormData.message.trim() || isImprovingEmail}
+                      className="text-xs h-7"
+                    >
+                      {isImprovingEmail ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          Improving...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="mr-1 h-3 w-3" />
+                          AI Improve
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <Textarea
+                    id="message"
+                    required
+                    rows={8}
+                    value={emailFormData.message}
+                    onChange={(e) => setEmailFormData({ ...emailFormData, message: e.target.value })}
+                    placeholder="Write your message here..."
+                    className="border-slate-300"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Tip: Write a brief message, then click "AI Improve" to enhance it professionally.
+                  </p>
+                </div>
+                <DialogFooter className="pt-4">
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
-                    onClick={handleImproveEmail}
-                    disabled={!emailFormData.message.trim() || isImprovingEmail}
-                    className="text-xs h-7"
+                    onClick={() => setIsEmailModalOpen(false)}
+                    className="border-slate-300 text-slate-700"
                   >
-                    {isImprovingEmail ? (
-                      <>
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        Improving...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="mr-1 h-3 w-3" />
-                        AI Improve
-                      </>
-                    )}
+                    Cancel
                   </Button>
-                </div>
-                <Textarea
-                  id="message"
-                  required
-                  rows={8}
-                  value={emailFormData.message}
-                  onChange={(e) => setEmailFormData({ ...emailFormData, message: e.target.value })}
-                  placeholder="Write your message here..."
-                  className="border-slate-300"
-                />
-                <p className="text-xs text-slate-500">
-                  Tip: Write a brief message, then click "AI Improve" to enhance it professionally.
-                </p>
-              </div>
-              <DialogFooter className="pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsEmailModalOpen(false)}
-                  className="border-slate-300 text-slate-700"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={emailSending}
-                  className="bg-emerald-600 text-white hover:bg-emerald-500"
-                >
-                  {emailSending ? 'Sending...' : 'Send Email'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div >
-    </SiteLayout >
+                  <Button
+                    type="submit"
+                    disabled={emailSending}
+                    className="bg-emerald-600 text-white hover:bg-emerald-500"
+                  >
+                    {emailSending ? 'Sending...' : 'Send Email'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+    </SiteLayout>
   );
 }
 

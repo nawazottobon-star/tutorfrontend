@@ -43,10 +43,10 @@ function scheduleFlush(): void {
   if (flushTimer || !isBrowser) {
     return;
   }
-  flushTimer = window.setTimeout(() => {
+  flushTimer = (window.setTimeout(() => {
     flushTimer = null;
     void flushBuffer();
-  }, BUFFER_FLUSH_INTERVAL_MS);
+  }, BUFFER_FLUSH_INTERVAL_MS) as any);
 }
 
 export function updateTelemetryAccessToken(token: string | null): void {

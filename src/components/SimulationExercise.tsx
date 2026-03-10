@@ -64,7 +64,7 @@ const normalizeSimulation = (simulation: SimulationPayload): NormalizedSimulatio
       const task = typeof node.task === "string" ? node.task : undefined;
       return { title, description, challenge, task };
     })
-    .filter((step): step is NormalizedStep => Boolean(step));
+    .filter(Boolean) as NormalizedStep[];
 
   return {
     scenario,
