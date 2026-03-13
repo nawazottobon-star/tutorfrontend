@@ -39,5 +39,5 @@ services:
 
 networks:
   cp-network:
-    external: true
+    driver: bridge
     name: course-platform-network
