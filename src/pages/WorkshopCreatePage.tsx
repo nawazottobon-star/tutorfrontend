@@ -1,358 +1,368 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { readStoredSession } from "@/utils/session";
 import { API_BASE_URL } from "@/lib/api";
-import { Trash2, Plus, Layout, Clock, Video, Users, GraduationCap, ChevronLeft, HelpCircle, Calendar as CalendarIcon } from "lucide-react";
-import "@/workshops.css";
+import {
+    Trash2, Plus, Minus, ChevronLeft, HelpCircle,
+    Calendar as CalendarIcon, Video, Users, Zap,
+    BookOpen, Settings2,
+} from "lucide-react";
 
 interface Question {
     id: string;
     number: number;
     text: string;
-    type: 'mcq' | 'text';
+    type: "mcq" | "text";
     options: string[] | null;
 }
-
-interface Course {
-    courseId: string;
-    title: string;
-}
+interface Course { courseId: string; title: string; }
 
 export default function WorkshopCreatePage() {
     const [, setLocation] = useLocation();
     const { toast } = useToast();
     const session = readStoredSession();
     const [questions, setQuestions] = useState<Question[]>([]);
+    const [seatCount, setSeatCount] = useState<number | "">("");
 
     const headers = useMemo(() => {
         if (!session?.accessToken) return undefined;
-        return { 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' };
+        return { Authorization: `Bearer ${session.accessToken}`, "Content-Type": "application/json" };
     }, [session?.accessToken]);
 
-    // Fetch tutor's courses to anchor the workshop
     const { data: coursesResponse } = useQuery<{ courses: Course[] }>({
-        queryKey: ['tutor-courses'],
+        queryKey: ["tutor-courses"],
         queryFn: async () => {
             const res = await fetch(`${API_BASE_URL}/api/tutors/me/courses`, { headers });
-            if (!res.ok) throw new Error("Failed to fetch courses");
+            if (!res.ok) throw new Error("failed");
             return res.json();
         },
-        enabled: !!headers
+        enabled: !!headers,
     });
-
     const courses = coursesResponse?.courses ?? [];
 
-    const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
-        defaultValues: {
-            title: "",
-            topic: "",
-            description: "",
-            googleMeetLink: "",
-            maxSeats: "",
-            scheduledAt: "",
-            courseId: ""
-        }
+    const { register, handleSubmit, setValue } = useForm({
+        defaultValues: { title: "", topic: "", description: "", googleMeetLink: "", maxSeats: "", scheduledAt: "", courseId: "" },
     });
 
-    const createWorkshopMutation = useMutation({
+    const createM = useMutation({
         mutationFn: async (data: any) => {
-            const res = await fetch(`${API_BASE_URL}/api/workshops`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(data)
-            });
-            if (!res.ok) throw new Error("Failed to create workshop");
+            const res = await fetch(`${API_BASE_URL}/api/workshops`, { method: "POST", headers, body: JSON.stringify(data) });
+            if (!res.ok) throw new Error("failed");
             return res.json();
-        }
+        },
     });
-
-    const saveQuestionsMutation = useMutation({
-        mutationFn: async ({ workshopId, questions }: { workshopId: string, questions: any[] }) => {
-            const res = await fetch(`${API_BASE_URL}/api/workshops/${workshopId}/questions`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ questions })
-            });
-            if (!res.ok) throw new Error("Failed to save questions");
+    const saveQsM = useMutation({
+        mutationFn: async ({ workshopId, questions }: { workshopId: string; questions: any[] }) => {
+            const res = await fetch(`${API_BASE_URL}/api/workshops/${workshopId}/questions`, { method: "POST", headers, body: JSON.stringify({ questions }) });
+            if (!res.ok) throw new Error("failed");
             return res.json();
-        }
+        },
     });
 
     const onSubmit = async (data: any) => {
         if (questions.length === 0) {
-            toast({ title: "Questions required", description: "Please add at least one registration question.", variant: "destructive" });
+            toast({ title: "Questions required", description: "Add at least one registration question.", variant: "destructive" });
             return;
         }
-
         try {
-            console.log("Submitting workshop data:", data);
-            const { workshopId } = await createWorkshopMutation.mutateAsync(data);
-            console.log("Workshop created successfully. ID:", workshopId);
-
-            console.log("Saving questions payload:", questions);
-            await saveQuestionsMutation.mutateAsync({ workshopId, questions });
-            console.log("Questions saved successfully.");
-
-            toast({ title: "Workshop Created! 🚀", description: "Your workshop is live and ready for registrations." });
-            setLocation('/tutors');
-        } catch (error) {
-            console.error("Submit pipeline failed:", error);
-            toast({ title: "Error", description: `Something went wrong: ${error}`, variant: "destructive" });
+            const { workshopId } = await createM.mutateAsync({
+                ...data,
+                maxSeats: seatCount !== "" ? String(seatCount) : undefined,
+            });
+            await saveQsM.mutateAsync({ workshopId, questions });
+            toast({ title: "Workshop Created! 🚀", description: "Your workshop is live for registrations." });
+            setLocation("/tutors");
+        } catch (e) {
+            toast({ title: "Error", description: `Something went wrong: ${e}`, variant: "destructive" });
         }
     };
 
-    const addQuestion = () => {
-        const newId = Math.random().toString(36).substr(2, 9);
-        setQuestions([...questions, {
-            id: newId,
-            number: questions.length + 1,
-            text: "",
-            type: 'text',
-            options: null
-        }]);
-    };
+    const addQ = () => setQuestions(p => [...p, { id: Math.random().toString(36).substr(2, 9), number: p.length + 1, text: "", type: "text", options: null }]);
+    const removeQ = (id: string) => setQuestions(p => p.filter(q => q.id !== id).map((q, i) => ({ ...q, number: i + 1 })));
+    const updateQ = (id: string, field: keyof Question, value: any) => setQuestions(p => p.map(q => q.id === id ? { ...q, [field]: value } : q));
 
-    const removeQuestion = (id: string) => {
-        setQuestions(questions.filter(q => q.id !== id).map((q, i) => ({ ...q, number: i + 1 })));
-    };
-
-    const updateQuestion = (id: string, field: keyof Question, value: any) => {
-        setQuestions(questions.map(q => q.id === id ? { ...q, [field]: value } : q));
-    };
+    const isPending = createM.isPending || saveQsM.isPending;
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-[#E1E8EE] via-[#F0F4F7] to-[#F8FAFC] pb-20 font-sans">
-            <div className="max-w-4xl mx-auto px-4 py-8">
-                <Button
-                    variant="ghost"
-                    onClick={() => setLocation('/tutors')}
-                    className="mb-8 hover:bg-white/50 rounded-2xl transition-all duration-300 text-slate-500 font-bold"
-                >
-                    <ChevronLeft className="mr-2 h-5 w-5" /> Back to Dashboard
-                </Button>
+        <div className="h-screen flex flex-col bg-white overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
 
-                <div className="flex items-center gap-5 mb-12">
-                    <div className="clay-card p-4 text-blue-600 bg-white">
-                        <GraduationCap className="w-8 h-8" />
-                    </div>
-                    <div>
-                        <h1 className="text-4xl font-black text-[#1F2937] tracking-tight">Conduct a Workshop</h1>
-                        <p className="text-slate-600 font-bold mt-1">Design your premium learning experience.</p>
+            {/* ── TOP NAV ── */}
+            <nav className="shrink-0 h-14 bg-white border-b border-slate-100 flex items-center justify-between px-8 z-10">
+                <button onClick={() => setLocation("/tutors")}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-indigo-600 transition-colors group">
+                    <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+                    Dashboard
+                </button>
+
+                {/* center title */}
+                <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none">
+                    <p className="text-[13px] font-black text-slate-800 tracking-tight">New Workshop</p>
+                    <p className="text-[11px] text-slate-400 font-medium">Fill in details and launch</p>
+                </div>
+
+                <button form="wf" type="submit" disabled={isPending}
+                    className="flex items-center gap-2 h-9 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 disabled:opacity-50 text-white text-sm font-bold transition-all">
+                    <Zap className="w-3.5 h-3.5" />
+                    {isPending ? "Launching…" : "Launch Workshop"}
+                </button>
+            </nav>
+
+            {/* ── MAIN BODY ── */}
+            <form id="wf" onSubmit={handleSubmit(onSubmit)} className="flex-1 flex overflow-hidden">
+
+                {/* ══ LEFT — Details + Logistics ══ */}
+                <div className="flex-1 overflow-y-auto bg-white">
+                    <div className="max-w-xl mx-auto px-8 py-7 space-y-8">
+
+                        {/* ─ Section A: Workshop Details ─ */}
+                        <section className="space-y-4">
+                            <SectionHeader
+                                icon={<BookOpen className="w-3.5 h-3.5 text-indigo-600" />}
+                                label="Workshop Details"
+                                sub="Basic information about your workshop"
+                            />
+                            <div className="grid grid-cols-2 gap-3">
+                                <Field label="Title" required>
+                                    <input {...register("title", { required: true })}
+                                        placeholder="e.g. System Design Masterclass"
+                                        className="w-inp" />
+                                </Field>
+                                <Field label="Anchor Course" required>
+                                    <Select onValueChange={v => setValue("courseId", v)} required>
+                                        <SelectTrigger className="w-inp h-10 border-slate-200 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium text-slate-700 bg-white">
+                                            <SelectValue placeholder="Select a course" />
+                                        </SelectTrigger>
+                                        <SelectContent className="rounded-xl border border-slate-100 shadow-lg">
+                                            {courses.map(c => (
+                                                <SelectItem key={c.courseId} value={c.courseId} className="rounded-lg text-sm font-medium py-2">{c.title}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </Field>
+                            </div>
+                            <Field label="Topic / Focus Area" required>
+                                <input {...register("topic", { required: true })}
+                                    placeholder="e.g. Scalability, Sharding, Load Balancing"
+                                    className="w-inp" />
+                            </Field>
+                            <Field label="Short Description" required>
+                                <textarea {...register("description", { required: true })} rows={2}
+                                    placeholder="What will learners gain from this session?"
+                                    className="w-inp resize-none py-2.5" style={{ height: "auto" }} />
+                            </Field>
+                        </section>
+
+                        {/* Divider */}
+                        <div className="flex items-center gap-3">
+                            <div className="flex-1 h-px bg-slate-100" />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Logistics</span>
+                            <div className="flex-1 h-px bg-slate-100" />
+                        </div>
+
+                        {/* ─ Section B: Logistics ─ */}
+                        <section className="space-y-4">
+                            <SectionHeader
+                                icon={<Settings2 className="w-3.5 h-3.5 text-emerald-600" />}
+                                label="Session Details"
+                                sub="When, where, and how many?"
+                            />
+                            <div className="grid grid-cols-2 gap-3">
+                                <Field label="Google Meet Link" required>
+                                    <label className="relative block cursor-text">
+                                        <Video className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none z-10" />
+                                        <input {...register("googleMeetLink", { required: true })}
+                                            placeholder="https://meet.google.com/…"
+                                            className="w-inp"
+                                            style={{ paddingLeft: '2.25rem' }} />
+                                    </label>
+                                </Field>
+                                <Field label="Date & Time" required>
+                                    <DateTimeField registerProps={register("scheduledAt", { required: true })} />
+                                </Field>
+                            </div>
+                            <div className="max-w-[200px]">
+                                <Field label="Max Seats" hint="optional">
+                                    {/* Custom stepper — no ugly browser spinners */}
+                                    <div className="relative">
+                                        <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none z-10" />
+                                        <input type="number"
+                                            {...register("maxSeats")}
+                                            placeholder="e.g. 50"
+                                            className="w-inp no-spin"
+                                            style={{ paddingLeft: '2.25rem' }} />
+                                    </div>
+                                </Field>
+                            </div>
+                        </section>
                     </div>
                 </div>
 
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-12">
-                    {/* Basic Details */}
-                    <div className="clay-card p-10 space-y-8">
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-500">
-                                <Layout className="w-6 h-6" />
-                            </div>
-                            <h2 className="text-2xl font-black text-slate-800 tracking-tight">Core Details</h2>
-                        </div>
+                {/* Vertical divider */}
+                <div className="w-px bg-slate-100 shrink-0" />
 
-                        <div className="grid gap-8 md:grid-cols-2">
-                            <div className="space-y-3">
-                                <Label className="text-[13px] font-black uppercase tracking-wider text-slate-600 ml-1">Workshop Title</Label>
-                                <input
-                                    {...register("title", { required: true })}
-                                    placeholder="e.g. Master Class on System Design"
-                                    className="clay-input w-full h-14 px-5 font-bold text-slate-800 placeholder:text-slate-400"
-                                />
+                {/* ══ RIGHT — Registration Questions ══ */}
+                <div className="w-[360px] shrink-0 bg-slate-50 flex flex-col">
+                    {/* Panel header */}
+                    <div className="shrink-0 flex items-center justify-between px-6 py-4 bg-white border-b border-slate-100">
+                        <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
+                                <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
                             </div>
-                            <div className="space-y-3">
-                                <Label className="text-[13px] font-black uppercase tracking-wider text-slate-600 ml-1">Anchor Course</Label>
-                                <Select onValueChange={(val) => setValue("courseId", val)} required>
-                                    <SelectTrigger className="clay-input h-14 border-none shadow-none focus:ring-0 px-5 font-bold text-slate-800">
-                                        <SelectValue placeholder="Select a course" />
-                                    </SelectTrigger>
-                                    <SelectContent className="rounded-2xl border-none shadow-xl">
-                                        {courses.map(c => (
-                                            <SelectItem key={c.courseId} value={c.courseId} className="rounded-xl font-bold py-3">{c.title}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                            <div>
+                                <p className="text-sm font-black text-slate-800">Registration Questions</p>
+                                <p className="text-[11px] text-slate-400 font-medium">Applicants fill these out</p>
                             </div>
                         </div>
-
-                        <div className="space-y-3">
-                            <Label className="text-[13px] font-black uppercase tracking-wider text-slate-600 ml-1">Workshop Topic</Label>
-                            <input
-                                {...register("topic", { required: true })}
-                                placeholder="e.g. Scalability, Sharding, and Load Balancing"
-                                className="clay-input w-full h-14 px-5 font-bold text-slate-800 placeholder:text-slate-400"
-                            />
-                        </div>
-
-                        <div className="space-y-3">
-                            <Label className="text-[13px] font-black uppercase tracking-wider text-slate-600 ml-1">Short Description</Label>
-                            <textarea
-                                {...register("description", { required: true })}
-                                placeholder="Tell learners what they will learn in this session..."
-                                className="clay-input w-full min-h-[120px] p-5 font-bold text-slate-800 placeholder:text-slate-400"
-                            />
-                        </div>
+                        <button type="button" onClick={addQ}
+                            className="flex items-center gap-1 h-7 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-bold transition-colors">
+                            <Plus className="w-3 h-3" /> Add
+                        </button>
                     </div>
 
-                    {/* Logistics */}
-                    <div className="clay-card p-10 space-y-8">
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-500">
-                                <Clock className="w-6 h-6" />
-                            </div>
-                            <h2 className="text-2xl font-black text-slate-800 tracking-tight">Logistics</h2>
-                        </div>
-
-                        <div className="grid gap-8 md:grid-cols-2">
-                            <div className="space-y-3">
-                                <Label className="text-[13px] font-black uppercase tracking-wider text-slate-600 ml-1">Google Meet Link</Label>
-                                <div className="relative">
-                                    <Video className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-400" />
-                                    <input
-                                        {...register("googleMeetLink", { required: true })}
-                                        placeholder="https://meet.google.com/abc-xyz-def"
-                                        className="clay-input w-full h-14 pl-12 pr-5 font-bold text-slate-800 placeholder:text-slate-400"
-                                    />
-                                </div>
-                            </div>
-                            <div className="space-y-3">
-                                <Label className="text-[13px] font-black uppercase tracking-wider text-slate-600 ml-1">Date & Time</Label>
-                                <div className="relative">
-                                    <CalendarIcon className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-400" />
-                                    <input
-                                        type="datetime-local"
-                                        {...register("scheduledAt", { required: true })}
-                                        className="clay-input w-full h-14 pl-12 pr-5 font-bold text-slate-800 placeholder:text-slate-400"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="grid gap-8 md:grid-cols-2">
-                            <div className="space-y-3">
-                                <Label className="text-[13px] font-black uppercase tracking-wider text-slate-600 ml-1">Max Seats (Optional)</Label>
-                                <div className="relative">
-                                    <Users className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-400" />
-                                    <input
-                                        type="number"
-                                        {...register("maxSeats")}
-                                        placeholder="e.g. 50"
-                                        className="clay-input w-full h-14 pl-12 pr-5 font-bold text-slate-800 placeholder:text-slate-400"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Registration Questions */}
-                    <div className="clay-card p-10 space-y-8">
-                        <div className="flex flex-row items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-500">
-                                    <HelpCircle className="w-6 h-6" />
+                    {/* Questions list */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                        {questions.length === 0 ? (
+                            <div className="h-full flex flex-col items-center justify-center gap-4 text-center px-4">
+                                <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 flex items-center justify-center shadow-sm">
+                                    <HelpCircle className="w-6 h-6 text-slate-300" />
                                 </div>
                                 <div>
-                                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">Registration Form</h2>
-                                    <p className="text-[12px] font-bold text-slate-400">Collect intent and information from learners.</p>
+                                    <p className="text-sm font-bold text-slate-600">No questions yet</p>
+                                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                                        At least one question is required. These help you screen applicants.
+                                    </p>
                                 </div>
-                            </div>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={addQuestion}
-                                className="clay-btn-blue h-11 px-6 shadow-sm"
-                            >
-                                <Plus className="w-5 h-5 mr-1" /> Add
-                            </Button>
-                        </div>
-
-                        {questions.length === 0 ? (
-                            <div className="py-20 text-center clay-input bg-slate-50/30">
-                                <p className="text-slate-400 font-bold">No questions added yet. Click 'Add' to start building.</p>
+                                <button type="button" onClick={addQ}
+                                    className="flex items-center gap-1.5 h-8 px-4 rounded-lg border border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 text-indigo-500 hover:text-indigo-700 text-xs font-bold transition-all">
+                                    <Plus className="w-3.5 h-3.5" /> Add First Question
+                                </button>
                             </div>
                         ) : (
-                            <div className="space-y-6">
+                            <>
                                 {questions.map((q, idx) => (
-                                    <div key={q.id} className="clay-card p-8 bg-white/50 relative group">
-                                        <div className="flex gap-6">
-                                            <div className="clay-card w-12 h-12 flex items-center justify-center font-black text-xl text-blue-500 bg-white shrink-0">
+                                    <div key={q.id}
+                                        className="bg-white rounded-xl border border-slate-200 p-3.5 space-y-2.5 group hover:border-indigo-200 hover:shadow-sm transition-all">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-600 text-[10px] font-black flex items-center justify-center shrink-0">
                                                 {q.number}
-                                            </div>
-                                            <div className="flex-1 space-y-6">
-                                                <input
-                                                    value={q.text}
-                                                    onChange={(e) => updateQuestion(q.id, 'text', e.target.value)}
-                                                    placeholder="Type your question here..."
-                                                    className="clay-input w-full h-12 px-5 font-bold text-slate-800 placeholder:text-slate-400"
+                                            </span>
+                                            <input
+                                                value={q.text}
+                                                onChange={e => updateQ(q.id, "text", e.target.value)}
+                                                placeholder={`Question ${idx + 1}…`}
+                                                className="flex-1 h-8 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-800 placeholder:text-slate-300 outline-none focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 transition-all"
+                                            />
+                                            <button type="button" onClick={() => removeQ(q.id)}
+                                                className="w-7 h-7 rounded-md text-slate-300 hover:text-red-400 hover:bg-red-50 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100">
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-2 pl-8">
+                                            <Select value={q.type} onValueChange={(val: any) => updateQ(q.id, "type", val)}>
+                                                <SelectTrigger className="w-32 h-7 rounded-md border border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-600 px-2.5 focus:ring-0 focus:ring-offset-0">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent className="rounded-xl border border-slate-100 shadow-lg">
+                                                    <SelectItem value="text" className="rounded-lg text-sm font-medium py-2">Short Answer</SelectItem>
+                                                    <SelectItem value="mcq" className="rounded-lg text-sm font-medium py-2">Multiple Choice</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            {q.type === "mcq" && (
+                                                <input placeholder="Yes, No, Maybe…"
+                                                    className="flex-1 h-7 px-2.5 rounded-md border border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-700 placeholder:text-slate-300 outline-none focus:bg-white focus:border-indigo-400 transition-all"
+                                                    onChange={e => updateQ(q.id, "options", e.target.value.split(",").map(s => s.trim()))}
                                                 />
-                                                <div className="flex items-center gap-6">
-                                                    <Select
-                                                        value={q.type}
-                                                        onValueChange={(val: any) => updateQuestion(q.id, 'type', val)}
-                                                    >
-                                                        <SelectTrigger className="clay-input w-[200px] h-11 border-none font-bold text-slate-500 px-5">
-                                                            <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent className="rounded-2xl border-none shadow-xl">
-                                                            <SelectItem value="text" className="rounded-xl font-bold py-2">Short Answer</SelectItem>
-                                                            <SelectItem value="mcq" className="rounded-xl font-bold py-2">Multiple Choice</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-
-                                                    {q.type === 'mcq' && (
-                                                        <input
-                                                            placeholder="Options (comma separated)"
-                                                            className="clay-input flex-1 h-11 px-5 font-bold text-slate-800 placeholder:text-slate-400"
-                                                            onChange={(e) => updateQuestion(q.id, 'options', e.target.value.split(',').map(s => s.trim()))}
-                                                        />
-                                                    )}
-
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => removeQuestion(q.id)}
-                                                        className="w-11 h-11 rounded-2xl text-red-300 hover:text-red-500 hover:bg-red-50 transition-all ml-auto"
-                                                    >
-                                                        <Trash2 className="w-5 h-5" />
-                                                    </Button>
-                                                </div>
-                                            </div>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
-                            </div>
+                                <button type="button" onClick={addQ}
+                                    className="w-full flex items-center justify-center gap-1.5 h-9 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 text-xs font-bold text-slate-400 hover:text-indigo-500 transition-colors">
+                                    <Plus className="w-3.5 h-3.5" /> Add another question
+                                </button>
+                            </>
                         )}
                     </div>
+                </div>
+            </form>
 
-                    <div className="flex justify-end gap-6 pt-8">
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => setLocation('/tutors')}
-                            className="h-14 px-10 font-black text-slate-400 hover:text-slate-600 transition-all"
-                        >
-                            Back out
-                        </Button>
-                        <Button
-                            type="submit"
-                            className="clay-btn-blue h-14 px-12 text-lg font-black tracking-tight"
-                            disabled={createWorkshopMutation.isPending}
-                        >
-                            {createWorkshopMutation.isPending ? "Launching..." : "Launch Workshop 🚀"}
-                        </Button>
-                    </div>
-                </form>
+            <style>{`
+                .w-inp {
+                    display: block;
+                    width: 100%;
+                    height: 2.5rem;
+                    padding: 0 0.75rem;
+                    border-radius: 0.5rem;
+                    border: 1px solid #e2e8f0;
+                    background: #fff;
+                    font-size: 0.8125rem;
+                    font-weight: 500;
+                    color: #1e293b;
+                    outline: none;
+                    transition: border-color 0.15s, box-shadow 0.15s;
+                }
+                .w-inp::placeholder { color: #94a3b8; font-weight: 400; }
+                .w-inp:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(99,102,241,0.08); }
+                .w-inp::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+                .no-spin::-webkit-inner-spin-button, .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+                .no-spin { -moz-appearance: textfield; }
+            `}</style>
+        </div>
+    );
+}
+
+function SectionHeader({ icon, label, sub }: { icon: React.ReactNode; label: string; sub: string }) {
+    return (
+        <div className="flex items-center gap-2.5 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                {icon}
             </div>
+            <div>
+                <p className="text-sm font-black text-slate-800">{label}</p>
+                <p className="text-[11px] text-slate-400 font-medium">{sub}</p>
+            </div>
+        </div>
+    );
+}
+
+function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
+    return (
+        <div className="space-y-1.5">
+            <label className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                {label}
+                {required && <span className="text-indigo-500 text-[9px]">*</span>}
+                {hint && <span className="ml-0.5 normal-case font-medium text-slate-300">({hint})</span>}
+            </label>
+            {children}
+        </div>
+    );
+}
+
+function DateTimeField({ registerProps }: { registerProps: any }) {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const { ref: hookRef, ...rest } = registerProps;
+
+    const openPicker = () => {
+        if (inputRef.current) {
+            inputRef.current.focus();
+            try { (inputRef.current as any).showPicker?.(); } catch { /* unsupported browser */ }
+        }
+    };
+
+    return (
+        <div className="relative cursor-pointer" onClick={openPicker}>
+            <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none z-10" />
+            <input
+                type="datetime-local"
+                {...rest}
+                ref={(e) => { hookRef(e); (inputRef as any).current = e; }}
+                className="w-inp cursor-pointer"
+                style={{ paddingLeft: '2.25rem' }}
+            />
         </div>
     );
 }

@@ -14,6 +14,7 @@ import CourseSubmissionWizardPage from "@/pages/CourseSubmissionWizardPage";
 import CourseCreationPendingPage from "@/pages/CourseCreationPendingPage";
 import WorkshopCreatePage from "@/pages/WorkshopCreatePage";
 import WorkshopDetailPage from "@/pages/WorkshopDetailPage";
+import ColdCallManager from "@/pages/ColdCallManager";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/tutor" component={TutorDashboardPage} />
       <Route path="/tutors/workshops/create" component={WorkshopCreatePage} />
       <Route path="/tutors/workshops/:id" component={WorkshopDetailPage} />
+      <Route path="/tutors/cold-calling" component={ColdCallManager} />
 
       {/* Default route - Tutor Landing Page */}
       <Route path="/" component={BecomeTutorPage} />

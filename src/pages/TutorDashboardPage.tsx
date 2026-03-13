@@ -240,7 +240,10 @@ export default function TutorDashboardPage() {
   const [assistantMessages, setAssistantMessages] = useState<TutorAssistantMessage[]>([]);
   const [assistantInput, setAssistantInput] = useState('');
   const [assistantLoading, setAssistantLoading] = useState(false);
-  const [selectedCohortId, setSelectedCohortId] = useState<string | null>(null);
+  const [selectedCohortId, setSelectedCohortId] = useState<string | null>(() => {
+    // Attempt to recover previous cohort selection from this session
+    return sessionStorage.getItem('last_selected_cohort_id');
+  });
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [emailFormData, setEmailFormData] = useState({ to: '' as string | string[], fullName: '', subject: '', message: '' });
   const [emailSending, setEmailSending] = useState(false);
@@ -363,7 +366,8 @@ export default function TutorDashboardPage() {
 
   const {
     data: cohortsResponse,
-    isLoading: cohortsLoading
+    isLoading: cohortsLoading,
+    isFetched: cohortsFetched
   } = useQuery<{ cohorts: Cohort[] }>({
     queryKey: ['tutor-cohorts', selectedCourseId],
     enabled: Boolean(selectedCourseId) && Boolean(headers),
@@ -389,10 +393,15 @@ export default function TutorDashboardPage() {
   }, [cohortsResponse?.cohorts]);
 
   useEffect(() => {
-    if (cohorts.length > 0 && !selectedCohortId) {
+    if (cohortsFetched && cohorts.length > 0 && !selectedCohortId) {
       setSelectedCohortId(cohorts[0].cohortId);
+      sessionStorage.setItem('last_selected_cohort_id', cohorts[0].cohortId);
     }
-  }, [cohorts, selectedCohortId]);
+  }, [cohorts, cohortsFetched, selectedCohortId]);
+
+  // Track if we are in the middle of picking the default cohort
+  const isCohortInitializing = cohortsFetched && cohorts.length > 0 && !selectedCohortId;
+  const isStatsReady = cohortsFetched && !isCohortInitializing;
 
 
 
@@ -401,7 +410,7 @@ export default function TutorDashboardPage() {
     isLoading: enrollmentsLoading
   } = useQuery<{ enrollments: EnrollmentRow[] }>({
     queryKey: ['tutor-enrollments', selectedCourseId, selectedCohortId],
-    enabled: Boolean(selectedCourseId) && Boolean(headers),
+    enabled: Boolean(selectedCourseId) && Boolean(headers) && isStatsReady,
     queryFn: async () => {
       const url = `/api/tutors/${selectedCourseId}/enrollments${selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
       const response = await apiRequest(
@@ -416,7 +425,7 @@ export default function TutorDashboardPage() {
 
   const { data: progressResponse, isLoading: progressLoading } = useQuery<{ learners: ProgressRow[]; totalModules: number }>({
     queryKey: ['tutor-progress', selectedCourseId, selectedCohortId],
-    enabled: Boolean(selectedCourseId) && Boolean(headers),
+    enabled: Boolean(selectedCourseId) && Boolean(headers) && isStatsReady,
     queryFn: async () => {
       const url = `/api/tutors/${selectedCourseId}/progress${selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
       const response = await apiRequest(
@@ -504,7 +513,7 @@ export default function TutorDashboardPage() {
     error: activityError
   } = useQuery<{ learners: ActivityLearner[]; summary: ActivitySummary }>({
     queryKey: ['activity-summary', selectedCourseId, selectedCohortId],
-    enabled: Boolean(selectedCourseId) && Boolean(headers),
+    enabled: Boolean(selectedCourseId) && Boolean(headers) && isStatsReady,
     refetchInterval: autoRefreshEnabled ? 30_000 : false,
     queryFn: async () => {
       const url = `/api/activity/courses/${selectedCourseId}/learners${selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
@@ -965,7 +974,8 @@ export default function TutorDashboardPage() {
     { id: 'classroom', label: 'Classroom', icon: BookOpen },
     { id: 'monitoring', label: 'Live Monitor', icon: Activity },
     { id: 'copilot', label: 'AI Copilot', icon: Zap },
-    { id: 'workshops', label: 'Workshops', icon: GraduationCap, isNew: true }
+    { id: 'workshops', label: 'Workshops', icon: GraduationCap, isNew: true },
+    { id: 'cold-calling', label: 'Cold Calling', icon: MessageSquare }
   ];
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -1007,6 +1017,11 @@ export default function TutorDashboardPage() {
   const handleSectionNav = (sectionId: string) => {
     if (sectionId === 'copilot') {
       setIsAssistantSheetOpen(true);
+      return;
+    }
+
+    if (sectionId === 'cold-calling') {
+      setLocation('/tutors/cold-calling');
       return;
     }
 
@@ -1130,6 +1145,8 @@ export default function TutorDashboardPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {overviewStats.map((stat) => {
                       const IconComponent = stat.icon;
+                      const isLoading = cohortsLoading || enrollmentsLoading || progressLoading || activityLoading;
+                      
                       return (
                         <motion.div
                           key={stat.label}
@@ -1154,12 +1171,20 @@ export default function TutorDashboardPage() {
 
                           {/* Number */}
                           <div className={`text-[48px] font-bold leading-none tracking-tight ${stat.color} stat-number mb-2 flex-1 flex items-center`}>
-                            <NumberTicker value={stat.value} suffix={stat.suffix} />
+                            {isLoading ? (
+                                <Skeleton className="h-10 w-20 bg-slate-200/50" />
+                            ) : (
+                                <NumberTicker value={stat.value} suffix={stat.suffix} />
+                            )}
                           </div>
 
                           {/* Helper text */}
                           <p className="text-[13px] text-[#9CA3AF] font-medium">
-                            {stat.helper}
+                            {isLoading ? (
+                                <Skeleton className="h-4 w-32 bg-slate-100/50" />
+                            ) : (
+                                stat.helper
+                            )}
                           </p>
                         </motion.div>
                       );
@@ -1236,7 +1261,13 @@ export default function TutorDashboardPage() {
                           Email Group ({enrollmentSelection.selectedEmails.size})
                         </Button>
                       )}
-                      <Select value={selectedCohortId ?? undefined} onValueChange={(value) => setSelectedCohortId(value)}>
+                      <Select 
+                        value={selectedCohortId ?? undefined} 
+                        onValueChange={(value) => {
+                          setSelectedCohortId(value);
+                          sessionStorage.setItem('last_selected_cohort_id', value);
+                        }}
+                      >
                         <SelectTrigger className="w-full border-[#E2E8F0] bg-white text-left text-[#1A202C] sm:w-[220px]">
                           <SelectValue placeholder={cohortsLoading ? 'Loading cohorts...' : 'Select cohort batch'} />
                         </SelectTrigger>
