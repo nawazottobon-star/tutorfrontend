@@ -42,11 +42,7 @@ import {
   GraduationCap,
   Calendar,
   ExternalLink,
-  ClipboardList,
-  Library,
-  Presentation,
-  MonitorPlay,
-  BookText
+  ClipboardList
 } from "lucide-react";
 import {
   Sheet,
@@ -235,41 +231,11 @@ interface Workshop {
   };
 }
 
-export type DeliveryFormat = 'cohort' | 'workshop' | 'ondemand' | null;
-
 export default function TutorDashboardPage() {
   const session = readStoredSession();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-
-  // --- NEW: State Machine for View Separation ---
-  const [selectedFormat, setSelectedFormat] = useState<DeliveryFormat>(() => {
-    return (sessionStorage.getItem('last_selected_format') as DeliveryFormat) || null;
-  });
-
-  const handleFormatSelect = (format: DeliveryFormat) => {
-    setSelectedFormat(format);
-    if (format) {
-      sessionStorage.setItem('last_selected_format', format);
-    } else {
-      sessionStorage.removeItem('last_selected_format');
-    }
-  };
-
-  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(() => {
-    return sessionStorage.getItem('last_selected_course') || null;
-  });
-
-  const handleCourseSelect = (courseId: string | null) => {
-    setSelectedCourseId(courseId);
-    if (courseId) {
-      sessionStorage.setItem('last_selected_course', courseId);
-    } else {
-      sessionStorage.removeItem('last_selected_course');
-      handleFormatSelect(null);
-    }
-  };
-
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedLearnerId, setSelectedLearnerId] = useState<string | null>(null);
   const [assistantMessages, setAssistantMessages] = useState<TutorAssistantMessage[]>([]);
   const [assistantInput, setAssistantInput] = useState('');
@@ -369,8 +335,28 @@ export default function TutorDashboardPage() {
 
   const courses = coursesResponse?.courses ?? [];
 
-  // Protect the dashboard: Redirect logic is now handled in the render phase
-  // based on selectedFormat and courses.length to support the Topic-First flow.
+  useEffect(() => {
+    if (courses.length > 0 && !selectedCourseId) {
+      setSelectedCourseId(courses[0].courseId);
+    }
+  }, [courses, selectedCourseId]);
+
+  // Protect the dashboard: If a tutor has no active courses, redirect them to the submission wizard.
+  // IMPORTANT: Only redirect after the query was actually enabled AND has finished fetching.
+  // Without `coursesFetched`, this fires immediately when the session/role hasn't loaded yet
+  // (because the query is disabled, coursesLoading stays false, courses stays []).
+  useEffect(() => {
+    if (
+      session?.role === 'tutor' &&
+      isTutorOrAdmin &&
+      coursesFetched &&
+      !coursesLoading &&
+      !coursesError &&
+      courses.length === 0
+    ) {
+      setLocation('/tutors/submit-course');
+    }
+  }, [session, isTutorOrAdmin, coursesFetched, coursesLoading, coursesError, courses, setLocation]);
 
   useEffect(() => {
     setAssistantMessages([]);
@@ -423,10 +409,10 @@ export default function TutorDashboardPage() {
     data: enrollmentsResponse,
     isLoading: enrollmentsLoading
   } = useQuery<{ enrollments: EnrollmentRow[] }>({
-    queryKey: ['tutor-enrollments', selectedCourseId, selectedCohortId, selectedFormat],
+    queryKey: ['tutor-enrollments', selectedCourseId, selectedCohortId],
     enabled: Boolean(selectedCourseId) && Boolean(headers) && isStatsReady,
     queryFn: async () => {
-      const url = `/api/tutors/${selectedCourseId}/enrollments${selectedFormat === 'ondemand' ? '?format=ondemand' : selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
+      const url = `/api/tutors/${selectedCourseId}/enrollments${selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
       const response = await apiRequest(
         'GET',
         url,
@@ -438,10 +424,10 @@ export default function TutorDashboardPage() {
   });
 
   const { data: progressResponse, isLoading: progressLoading } = useQuery<{ learners: ProgressRow[]; totalModules: number }>({
-    queryKey: ['tutor-progress', selectedCourseId, selectedCohortId, selectedFormat],
+    queryKey: ['tutor-progress', selectedCourseId, selectedCohortId],
     enabled: Boolean(selectedCourseId) && Boolean(headers) && isStatsReady,
     queryFn: async () => {
-      const url = `/api/tutors/${selectedCourseId}/progress${selectedFormat === 'ondemand' ? '?format=ondemand' : selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
+      const url = `/api/tutors/${selectedCourseId}/progress${selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
       const response = await apiRequest(
         'GET',
         url,
@@ -526,11 +512,11 @@ export default function TutorDashboardPage() {
     isFetching: activityFetching,
     error: activityError
   } = useQuery<{ learners: ActivityLearner[]; summary: ActivitySummary }>({
-    queryKey: ['activity-summary', selectedCourseId, selectedCohortId, selectedFormat],
+    queryKey: ['activity-summary', selectedCourseId, selectedCohortId],
     enabled: Boolean(selectedCourseId) && Boolean(headers) && isStatsReady,
     refetchInterval: autoRefreshEnabled ? 30_000 : false,
     queryFn: async () => {
-      const url = `/api/activity/courses/${selectedCourseId}/learners${selectedFormat === 'ondemand' ? '?format=ondemand' : selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
+      const url = `/api/activity/courses/${selectedCourseId}/learners${selectedCohortId ? `?cohortId=${selectedCohortId}` : ''}`;
       const response = await apiRequest(
         'GET',
         url,
@@ -757,11 +743,6 @@ export default function TutorDashboardPage() {
   }
 
   const handleLogout = () => {
-    // Clear all dashboard-related session storage to ensure fresh entry on next login
-    sessionStorage.removeItem('last_selected_course');
-    sessionStorage.removeItem('last_selected_format');
-    sessionStorage.removeItem('last_selected_cohort_id');
-    
     clearStoredSession();
     toast({ title: 'Signed out' });
     setLocation('/become-a-tutor');
@@ -993,6 +974,7 @@ export default function TutorDashboardPage() {
     { id: 'classroom', label: 'Classroom', icon: BookOpen },
     { id: 'monitoring', label: 'Live Monitor', icon: Activity },
     { id: 'copilot', label: 'AI Copilot', icon: Zap },
+    { id: 'workshops', label: 'Workshops', icon: GraduationCap, isNew: true },
     { id: 'cold-calling', label: 'Cold Calling', icon: MessageSquare }
   ];
 
@@ -1090,457 +1072,11 @@ export default function TutorDashboardPage() {
     );
   }
 
-  // --- View 0: EMPTY STATE (No courses exist) ---
-  if (coursesFetched && courses.length === 0) {
-    return (
-      <SiteLayout headerProps={{ onLogout: handleLogout }}>
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-3xl p-10 max-w-lg w-full text-center shadow-xl border border-slate-100"
-          >
-            <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-6">
-              <BookOpen className="w-10 h-10 text-indigo-500" />
-            </div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tight mb-3">Welcome! Let's get started.</h2>
-            <p className="text-slate-500 mb-8 leading-relaxed">
-              Before you can manage cohorts, workshops, or on-demand learners, you need to create your first topic.
-            </p>
-            <Button 
-              onClick={() => setLocation('/tutors/submit-course')}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-xl h-12 font-bold shadow-md"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Submit Your First Topic
-            </Button>
-          </motion.div>
-        </div>
-      </SiteLayout>
-    );
-  }
-
-  // --- View 1: TOPIC SELECTION HUB ---
-  if (!selectedCourseId) {
-    return (
-      <SiteLayout headerProps={{ onLogout: handleLogout }}>
-        <div className="min-h-screen bg-[#FDFCFB] py-8 px-4 sm:px-6 lg:px-8 flex flex-col items-center overflow-hidden">
-          {/* Organic Background Element */}
-          <div className="absolute top-0 left-0 w-full h-[400px] bg-[radial-gradient(circle_at_top_right,_#EEF2FF_0%,_transparent_70%)] opacity-70 pointer-events-none" />
-          <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-[radial-gradient(circle_at_bottom_left,_#F5F3FF_0%,_transparent_70%)] opacity-50 pointer-events-none" />
-          
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: "spring", damping: 20, stiffness: 100 }}
-            className="text-center max-w-4xl mb-12 relative z-10"
-          >
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 text-[10px] font-bold uppercase tracking-wider mb-4 shadow-sm">
-              <Sparkles className="w-3 h-3" />
-              <span>Teaching Command Center</span>
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight mb-4 leading-tight">
-              Hello, <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600">{session.fullName?.split(' ')[0] ?? 'Tutor'}</span>.
-            </h1>
-            <p className="text-lg text-slate-500 font-medium max-w-xl mx-auto leading-relaxed">
-              Your curriculum is ready. Select a topic to manage your learners.
-            </p>
-          </motion.div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl w-full relative z-10" style={{ perspective: "1200px" }}>
-            {coursesLoading ? (
-               Array(3).fill(0).map((_, i) => (
-                  <div key={i} className="animate-pulse bg-white border border-slate-100 h-[220px] rounded-[32px] shadow-sm" />
-               ))
-            ) : courses.map((course, index) => (
-              <motion.div 
-                key={course.courseId}
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                transition={{ 
-                  type: "spring", 
-                  damping: 25, 
-                  stiffness: 120, 
-                  delay: index * 0.1 
-                }}
-                whileHover={{ 
-                  y: -12, 
-                  rotateX: 3,
-                  rotateY: -3,
-                  boxShadow: "0 40px 80px -15px rgba(99, 102, 241, 0.25), 0 0 30px rgba(99, 102, 241, 0.15)",
-                }}
-                whileTap={{ scale: 0.92, y: 0, rotateX: 0, rotateY: 0 }}
-                onClick={() => handleCourseSelect(course.courseId)}
-                className="bg-white/90 backdrop-blur-3xl rounded-[40px] p-8 border border-white/50 shadow-soft group cursor-pointer flex flex-col h-auto min-h-[280px] hover:border-indigo-400 transition-all duration-700 relative overflow-hidden"
-              >
-                {/* Advanced Background Aurora */}
-                <motion.div 
-                  animate={{ 
-                    scale: [1, 1.2, 1],
-                    rotate: [0, 90, 0],
-                    x: [0, 20, 0],
-                    y: [0, -20, 0]
-                  }}
-                  transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-                  className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-200/20 rounded-full blur-[80px] pointer-events-none group-hover:bg-indigo-300/40 transition-colors"
-                />
-                <motion.div 
-                  animate={{ 
-                    scale: [1.2, 1, 1.2],
-                    rotate: [0, -90, 0],
-                    x: [0, -20, 0],
-                    y: [0, 20, 0]
-                  }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                  className="absolute -bottom-20 -left-20 w-64 h-64 bg-violet-200/20 rounded-full blur-[80px] pointer-events-none group-hover:bg-violet-300/40 transition-colors"
-                />
-
-                {/* Glass Shimmer */}
-                <motion.div 
-                  initial={{ x: "-150%", opacity: 0 }}
-                  whileHover={{ x: "250%", opacity: 1 }}
-                  transition={{ duration: 1.2, ease: "circOut" }}
-                  className="absolute inset-0 z-0 pointer-events-none bg-gradient-to-r from-transparent via-white/60 to-transparent skew-x-[-35deg]"
-                />
-
-                <div className="flex items-center justify-between mb-8 relative z-10">
-                  <motion.div 
-                    whileHover={{ scale: 1.15, rotate: 12 }}
-                    className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-inner group-hover:bg-indigo-600 group-hover:text-white group-hover:shadow-[0_10px_30px_rgba(79,70,229,0.5)] transition-all duration-700"
-                  >
-                    <Library className="w-8 h-8" />
-                  </motion.div>
-                  <div className="opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-500">
-                    <div className="bg-slate-900 text-white text-[10px] font-black py-1.5 px-4 rounded-full uppercase tracking-tighter shadow-xl">
-                      Configure Topic
-                    </div>
-                  </div>
-                </div>
-                
-                <h3 className="text-3xl font-black text-slate-900 mb-4 group-hover:text-indigo-600 transition-colors leading-[1.1] tracking-tighter relative z-10">
-                  {course.title}
-                </h3>
-                <p className="text-slate-500 text-base leading-snug font-medium flex-1 mb-8 relative z-10 opacity-70 group-hover:opacity-100 transition-opacity">
-                  {course.description || "Master the digital classroom. Orchestrate your curriculum, drive engagement, and track learning deep-signals for this topic."}
-                </p>
-                
-                <div className="flex items-center gap-2 text-indigo-600 font-black text-xs uppercase tracking-[2px] pt-6 border-t border-slate-100 group-hover:border-indigo-200 transition-all relative z-10">
-                  <span>Enter Command Center</span>
-                  <motion.div 
-                    animate={{ x: [0, 4, 0] }}
-                    transition={{ duration: 1.5, repeat: Infinity }}
-                    className="flex"
-                  >
-                    &rarr;
-                  </motion.div>
-                </div>
-              </motion.div>
-            ))}
-
-            {/* Empty Context Card - Just for Visual Balance & Creativity */}
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: courses.length * 0.1 }}
-              className="bg-slate-50/50 border-2 border-dashed border-slate-200 rounded-[32px] p-8 flex flex-col items-center justify-center text-center opacity-70 hover:opacity-100 transition-opacity cursor-pointer group"
-              onClick={() => setLocation('/tutors/submit-course')}
-            >
-              <div className="w-12 h-12 rounded-full border-2 border-slate-300 flex items-center justify-center mb-4 group-hover:bg-slate-900 group-hover:border-slate-900 group-hover:text-white transition-all">
-                <Plus className="w-5 h-5" />
-              </div>
-              <p className="text-slate-600 font-bold mb-1">My Proposals & New Course</p>
-              <p className="text-slate-400 text-xs">Track your drafts or architect something new</p>
-            </motion.div>
-          </div>
-        </div>
-      </SiteLayout>
-    );
-  }
-
-  // --- View 2: FORMAT SELECTION HUB ---
-  const selectedCourseTitle = courses.find((c) => c.courseId === selectedCourseId)?.title ?? 'your course';
-
-  if (!selectedFormat) {
-    return (
-      <SiteLayout headerProps={{ onLogout: handleLogout }}>
-        <div className="min-h-screen bg-[#FCFCFD] flex flex-col items-center">
-          {/* Top Breadcrumb Hook - Glassmorphism floating pill */}
-          <div className="w-full max-w-7xl px-6 pt-4 relative z-50">
-            <motion.div 
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/60 backdrop-blur-2xl border border-white/40 shadow-sm text-xs font-bold"
-            >
-              <button onClick={() => handleCourseSelect(null)} className="flex items-center gap-1.5 text-slate-400 hover:text-slate-900 transition-colors">
-                <Home className="w-3.5 h-3.5" /> Hub
-              </button>
-              <span className="text-slate-200">/</span>
-              <span className="text-indigo-600 truncate max-w-[200px] tracking-tight">{selectedCourseTitle}</span>
-            </motion.div>
-          </div>
-
-          <div className="flex-1 w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-4 flex flex-col items-center justify-center relative">
-            {/* Background Accent */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-50/20 rounded-full blur-[100px] -z-10" />
-            
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: "spring", damping: 25, stiffness: 120 }}
-              className="text-center max-w-4xl mb-10"
-            >
-              <h2 className="text-[10px] font-black uppercase tracking-[2px] text-indigo-500 mb-2">Delivery Format</h2>
-              <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tighter mb-4 leading-tight">
-                How will you teach <br/>
-                <span className="italic text-indigo-600 font-serif">today?</span>
-              </h1>
-              <p className="text-base text-slate-400 font-medium max-w-lg mx-auto leading-relaxed">
-                Choose your delivery engine. Optimized for your teaching style.
-              </p>
-            </motion.div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 w-full max-w-6xl pb-20" style={{ perspective: "1500px" }}>
-              
-              {/* Cohorts - "The Digital Classroom" */}
-              <motion.div 
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.1, type: "spring" }}
-                whileHover={{ 
-                  y: -15, 
-                  rotateY: -6,
-                  rotateX: 3,
-                  boxShadow: "0 50px 100px -20px rgba(59, 130, 246, 0.3), 0 0 40px rgba(59, 130, 246, 0.15)" 
-                }}
-                whileTap={{ scale: 0.92, rotateY: 0, rotateX: 0 }}
-                onClick={() => handleFormatSelect('cohort')}
-                className="bg-white/95 backdrop-blur-3xl rounded-[40px] p-8 border border-white/60 shadow-soft cursor-pointer flex flex-col group relative overflow-hidden transition-all duration-700 hover:border-blue-400"
-              >
-                {/* Advanced Background Aurora */}
-                <motion.div 
-                  animate={{ 
-                    scale: [1, 1.3, 1],
-                    x: [0, 30, 0],
-                    y: [0, -30, 0]
-                  }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                  className="absolute -top-16 -right-16 w-48 h-48 bg-blue-200/20 rounded-full blur-[60px] pointer-events-none group-hover:bg-blue-300/40 transition-colors"
-                />
-
-                {/* Glass Shine */}
-                <motion.div 
-                  initial={{ x: "-150%", opacity: 0 }}
-                  whileHover={{ x: "250%", opacity: 1 }}
-                  transition={{ duration: 1.4, ease: "circOut" }}
-                  className="absolute inset-0 z-0 pointer-events-none bg-gradient-to-r from-transparent via-white/50 to-transparent skew-x-[-30deg]"
-                />
-                
-                <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-10 group-hover:scale-110 group-hover:rotate-6 group-hover:bg-blue-600 group-hover:text-white group-hover:shadow-[0_15px_35px_rgba(59,130,246,0.4)] transition-all duration-700 relative z-10">
-                  <Users className="w-8 h-8" />
-                </div>
-                
-                <div className="space-y-3 flex-1 relative z-10">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-2xl font-black text-slate-900">Cohorts</h3>
-                    <Badge className="bg-blue-100 text-blue-600 border-none px-1.5 py-0 text-[8px] uppercase font-black tracking-widest">Interactive</Badge>
-                  </div>
-                  <p className="text-slate-500 text-sm leading-relaxed font-medium">
-                    Steer your batch. Monitor progress and handle friction alerts.
-                  </p>
-                </div>
-
-                <div className="mt-8 flex items-center justify-between relative z-10">
-                  <div className="text-blue-600 font-black text-xs uppercase tracking-tighter flex items-center gap-1 group-hover:gap-2 transition-all">
-                    Enter Classroom <span>&rarr;</span>
-                  </div>
-                  <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Real-time</div>
-                </div>
-              </motion.div>
-
-              {/* Workshops - "The Live Stage" */}
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2, type: "spring" }}
-                whileHover={{ 
-                  y: -15, 
-                  rotateY: 0,
-                  rotateX: 6,
-                  boxShadow: "0 50px 100px -20px rgba(99, 102, 241, 0.3), 0 0 40px rgba(99, 102, 241, 0.15)" 
-                }}
-                whileTap={{ scale: 0.92, rotateY: 0, rotateX: 0 }}
-                onClick={() => handleFormatSelect('workshop')}
-                className="bg-white/95 backdrop-blur-3xl rounded-[40px] p-8 border border-white/60 shadow-soft cursor-pointer flex flex-col group relative overflow-hidden transition-all duration-700 hover:border-indigo-400"
-              >
-                {/* Advanced Background Aurora */}
-                <motion.div 
-                  animate={{ 
-                    scale: [1, 1.3, 1],
-                    x: [0, 30, 0],
-                    y: [0, -30, 0]
-                  }}
-                  transition={{ duration: 12, repeat: Infinity, ease: "linear" }}
-                  className="absolute -top-16 -right-16 w-48 h-48 bg-indigo-200/20 rounded-full blur-[60px] pointer-events-none group-hover:bg-indigo-300/40 transition-colors"
-                />
-
-                {/* Glass Shine */}
-                <motion.div 
-                  initial={{ x: "-150%", opacity: 0 }}
-                  whileHover={{ x: "250%", opacity: 1 }}
-                  transition={{ duration: 1.4, ease: "circOut" }}
-                  className="absolute inset-0 z-0 pointer-events-none bg-gradient-to-r from-transparent via-white/50 to-transparent skew-x-[-30deg]"
-                />
-                
-                <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-10 group-hover:scale-110 group-hover:-rotate-6 group-hover:bg-indigo-600 group-hover:text-white group-hover:shadow-[0_15px_35px_rgba(99,102,241,0.4)] transition-all duration-700 relative z-10">
-                  <Presentation className="w-8 h-8" />
-                </div>
-                
-                <div className="space-y-3 flex-1 relative z-10">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-2xl font-black text-slate-900">Workshops</h3>
-                    <div className="flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">
-                      <span className="w-1 h-1 rounded-full bg-red-500" /> Live
-                    </div>
-                  </div>
-                  <p className="text-slate-500 text-sm leading-relaxed font-medium">
-                    Host impact-driven live sessions and capture high-intent leads.
-                  </p>
-                </div>
-
-                <div className="mt-8 flex items-center justify-between relative z-10">
-                  <div className="text-indigo-600 font-black text-xs uppercase tracking-tighter flex items-center gap-1 group-hover:gap-2 transition-all">
-                    Host Session <span>&rarr;</span>
-                  </div>
-                  <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Spotlight</div>
-                </div>
-              </motion.div>
-
-              {/* On-Demand - "The 24/7 Library" */}
-              <motion.div 
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.3, type: "spring" }}
-                whileHover={{ 
-                  y: -15, 
-                  rotateY: 6,
-                  rotateX: 3,
-                  boxShadow: "0 50px 100px -20px rgba(16, 185, 129, 0.3), 0 0 40px rgba(16, 185, 129, 0.15)" 
-                }}
-                whileTap={{ scale: 0.92, rotateY: 0, rotateX: 0 }}
-                onClick={() => handleFormatSelect('ondemand')}
-                className="bg-white/95 backdrop-blur-3xl rounded-[40px] p-8 border border-white/60 shadow-soft cursor-pointer flex flex-col group relative overflow-hidden transition-all duration-700 hover:border-emerald-400"
-              >
-                {/* Advanced Background Aurora */}
-                <motion.div 
-                  animate={{ 
-                    scale: [1, 1.3, 1],
-                    x: [0, 30, 0],
-                    y: [0, -30, 0]
-                  }}
-                  transition={{ duration: 14, repeat: Infinity, ease: "linear" }}
-                  className="absolute -top-16 -right-16 w-48 h-48 bg-emerald-200/20 rounded-full blur-[60px] pointer-events-none group-hover:bg-emerald-300/40 transition-colors"
-                />
-
-                {/* Glass Shine */}
-                <motion.div 
-                  initial={{ x: "-150%", opacity: 0 }}
-                  whileHover={{ x: "250%", opacity: 1 }}
-                  transition={{ duration: 1.4, ease: "circOut" }}
-                  className="absolute inset-0 z-0 pointer-events-none bg-gradient-to-r from-transparent via-white/50 to-transparent skew-x-[-30deg]"
-                />
-                
-                <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-10 group-hover:scale-110 group-hover:rotate-6 group-hover:bg-emerald-600 group-hover:text-white group-hover:shadow-[0_15px_35px_rgba(16,185,129,0.4)] transition-all duration-700 relative z-10">
-                  <MonitorPlay className="w-8 h-8" />
-                </div>
-                
-                <div className="space-y-4 flex-1 relative z-10">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter">On-Demand</h3>
-                    <Badge className="bg-emerald-100 text-emerald-700 border-none px-2 py-0.5 text-[9px] uppercase font-black tracking-widest rounded-lg">Self-Paced</Badge>
-                  </div>
-                  <p className="text-slate-500 text-base leading-snug font-medium opacity-70 group-hover:opacity-100 transition-opacity">
-                    Analyze your asynchronous library and track self-guided engagement.
-                  </p>
-                </div>
-
-                <div className="mt-10 flex items-center justify-between relative z-10">
-                  <div className="text-emerald-600 font-black text-xs uppercase tracking-[2px] flex items-center gap-1 group-hover:gap-2 transition-all">
-                    View Library <motion.span animate={{ x: [0, 4, 0] }} transition={{ repeat: Infinity, duration: 2 }}>&rarr;</motion.span>
-                  </div>
-                  <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest px-2 py-1 bg-slate-50 rounded-md">Growth Layer</div>
-                </div>
-              </motion.div>
-
-            </div>
-          </div>
-        </div>
-      </SiteLayout>
-    );
-  }
-
-
-  // --- Smart Breadcrumb Header ---
-  const renderBreadcrumbHeader = () => {
-    return (
-      <div className="sticky top-4 z-40 px-6 pointer-events-none">
-        <motion.div 
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="max-w-7xl mx-auto flex items-center justify-between gap-4 p-2 pl-6 bg-white/60 backdrop-blur-3xl border border-white/40 shadow-[0_8px_32px_rgba(31,38,135,0.07)] rounded-[20px] pointer-events-auto"
-        >
-          <div className="flex items-center gap-1.5 text-xs font-black text-slate-400 overflow-x-auto no-scrollbar py-1 shrink-0">
-            <button 
-              onClick={() => handleCourseSelect(null)} 
-              className="hover:bg-slate-100/50 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shrink-0"
-            >
-              <Home className="w-3.5 h-3.5" /> Hub
-            </button>
-            <span className="text-slate-200 shrink-0 mx-1">/</span>
-            
-            <div className="flex items-center bg-white/40 border border-white/50 rounded-xl px-1 py-0.5 shadow-sm">
-              <Select value={selectedCourseId ?? undefined} onValueChange={handleCourseSelect}>
-                <SelectTrigger className="w-auto min-w-[140px] border-none bg-transparent hover:bg-white/60 focus:ring-0 shadow-none text-slate-800 font-black h-8 shrink-0 rounded-lg transition-all text-sm tracking-tight">
-                  <SelectValue placeholder={coursesLoading ? "Loading..." : "Select Topic"} />
-                </SelectTrigger>
-                <SelectContent className="rounded-2xl border-slate-100 shadow-2xl">
-                  {courses.map((course) => (
-                    <SelectItem key={course.courseId} value={course.courseId} className="font-bold py-3">
-                      {course.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <span className="text-slate-200 shrink-0 mx-1">/</span>
-            
-            <div className="flex items-center bg-white/40 border border-white/50 rounded-xl px-1 py-0.5 shadow-sm">
-              <Select value={selectedFormat ?? undefined} onValueChange={(v) => handleFormatSelect(v as DeliveryFormat)}>
-                <SelectTrigger className="w-auto min-w-[110px] border-none bg-transparent hover:bg-white/60 focus:ring-0 shadow-none text-indigo-600 font-black h-8 shrink-0 tracking-[0.1em] uppercase text-[10px] rounded-lg transition-all">
-                  <SelectValue placeholder="Format" />
-                </SelectTrigger>
-                <SelectContent className="rounded-2xl border-slate-100 shadow-2xl">
-                    <SelectItem value="cohort" className="font-bold py-3 text-blue-600">Cohorts</SelectItem>
-                    <SelectItem value="workshop" className="font-bold py-3 text-indigo-600">Workshops</SelectItem>
-                    <SelectItem value="ondemand" className="font-bold py-3 text-emerald-600">On-Demand</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          
-        </motion.div>
-      </div>
-    );
-  };
-
   return (
     <SiteLayout headerProps={{ onLogout: handleLogout }}>
-      {renderBreadcrumbHeader()}
       <div className="min-h-screen">
         <div className="w-full pb-16 pt-6 text-[#1A202C]">
-          {selectedFormat !== 'workshop' && (
-            <div className="animate-in fade-in duration-500 flex flex-col gap-8">
-          <section id="overview" className="mb-0">
+          <section id="overview" className="mb-10">
             {/* Two-Column Hero Section */}
             <div className="bg-white rounded-2xl p-8 shadow-lg mb-8">
               <div className="flex flex-col lg:flex-row gap-10 items-center lg:items-start">
@@ -1663,6 +1199,7 @@ export default function TutorDashboardPage() {
             {navItems.map((item) => {
               const ItemIcon = item.icon;
               const isActive = activeTab === item.id;
+              const isWorkshops = item.id === 'workshops';
 
               return (
                 <button
@@ -1673,12 +1210,23 @@ export default function TutorDashboardPage() {
                     handleSectionNav(item.id);
                   }}
                   className={`tab-transition relative rounded-full px-6 py-3 text-sm font-black flex items-center gap-2 transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] ${isActive
-                    ? 'tab-pill-active'
+                    ? (isWorkshops ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-200' : 'tab-pill-active')
                     : 'tab-pill-inactive hover:bg-slate-100 hover:text-slate-800'
                     }`}
                 >
-                  <ItemIcon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
+                  <ItemIcon className={`w-4 h-4 ${isActive ? 'text-white' : (isWorkshops ? 'text-indigo-500' : 'text-slate-500')}`} />
                   {item.label}
+
+                  {item.isNew && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-[32px] items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-black uppercase tracking-tighter text-white shadow-md ring-2 ring-white animate-bounce">
+                      New
+                      <span className="absolute h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
+                    </span>
+                  )}
+
+                  {!isActive && isWorkshops && (
+                    <div className="flex h-1.5 w-1.5 rounded-full bg-indigo-500 ml-1 pulse-alert" />
+                  )}
                 </button>
               );
             })}
@@ -1700,9 +1248,7 @@ export default function TutorDashboardPage() {
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <CardTitle className="text-[20px] font-bold text-[#1F2937]">Enrollments</CardTitle>
-                      <p className="text-[13px] text-[#9CA3AF] mt-1">
-                        {totalEnrollments} {selectedFormat === 'ondemand' ? 'on-demand learners' : 'learners in the cohort'}
-                      </p>
+                      <p className="text-[13px] text-[#9CA3AF] mt-1">{totalEnrollments} learners in the cohort</p>
                     </div>
                     <div className="flex items-center gap-3">
                       {enrollmentSelection.selectedEmails.size > 0 && (
@@ -1715,26 +1261,24 @@ export default function TutorDashboardPage() {
                           Email Group ({enrollmentSelection.selectedEmails.size})
                         </Button>
                       )}
-                      {selectedFormat !== 'ondemand' && (
-                          <Select 
-                            value={selectedCohortId ?? undefined} 
-                            onValueChange={(value) => {
-                              setSelectedCohortId(value);
-                              sessionStorage.setItem('last_selected_cohort_id', value);
-                            }}
-                          >
-                            <SelectTrigger className="w-full border-[#E2E8F0] bg-white text-left text-[#1A202C] sm:w-[220px]">
-                              <SelectValue placeholder={cohortsLoading ? 'Loading cohorts...' : 'Select cohort batch'} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {cohorts.map((cohort) => (
-                                <SelectItem key={cohort.cohortId} value={cohort.cohortId}>
-                                  {cohort.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                      )}
+                      <Select 
+                        value={selectedCohortId ?? undefined} 
+                        onValueChange={(value) => {
+                          setSelectedCohortId(value);
+                          sessionStorage.setItem('last_selected_cohort_id', value);
+                        }}
+                      >
+                        <SelectTrigger className="w-full border-[#E2E8F0] bg-white text-left text-[#1A202C] sm:w-[220px]">
+                          <SelectValue placeholder={cohortsLoading ? 'Loading cohorts...' : 'Select cohort batch'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {cohorts.map((cohort) => (
+                            <SelectItem key={cohort.cohortId} value={cohort.cohortId}>
+                              {cohort.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 </CardHeader>
@@ -2923,11 +2467,7 @@ export default function TutorDashboardPage() {
               </div>
             </div>
           </section>
-            </div>
-          )}
 
-          {selectedFormat === 'workshop' && (
-            <div className="animate-in fade-in duration-500">
           {/* Workshops Section */}
           <section id="workshops" className="mt-8 space-y-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2972,76 +2512,56 @@ export default function TutorDashboardPage() {
                   </Button>
                 </Card>
               ) : (
-                (workshopsResponse?.workshops ?? []).map((workshop: any) => {
-                  const isMarketing = workshop.type === 'marketing';
-                  return (
-                    <Card
-                      key={workshop.workshopId}
-                      onClick={() => setLocation(`/tutors/workshops/${workshop.workshopId}`)}
-                      className={`border bg-white group cursor-pointer hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col ${
-                        isMarketing ? 'border-amber-200 border-dashed bg-amber-50/10' : 'border-[#E5E7EB]'
-                      }`}
-                    >
-                      <div className="p-6 flex-1">
-                        <div className="flex items-start justify-between mb-4">
-                          <div className={`p-2 rounded-lg ${isMarketing ? 'bg-amber-100 text-amber-600' : 'bg-[#EBF5FF] text-[#3B82F6]'}`}>
-                            <GraduationCap className="w-5 h-5" />
-                          </div>
-                          <div className="flex flex-col items-end gap-1">
-                            {isMarketing && (
-                              <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[9px] font-black uppercase tracking-tighter">
-                                Marketing Draft
-                              </Badge>
-                            )}
-                            {workshop.offering._count.registrations > 0 && (
-                              <Badge className="bg-[#FFF7ED] text-[#EA580C] border-[#FFEDD5] text-[10px] font-bold">
-                                {workshop.offering._count.registrations} Leads
-                              </Badge>
-                            )}
-                          </div>
+                (workshopsResponse?.workshops ?? []).map((workshop: any) => (
+                  <Card
+                    key={workshop.workshopId}
+                    onClick={() => setLocation(`/tutors/workshops/${workshop.workshopId}`)}
+                    className="border border-[#E5E7EB] bg-white group cursor-pointer hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col"
+                  >
+                    <div className="p-6 flex-1">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="bg-[#EBF5FF] p-2 rounded-lg text-[#3B82F6]">
+                          <GraduationCap className="w-5 h-5" />
                         </div>
-                        <h3 className={`text-lg font-bold line-clamp-2 min-h-[3.5rem] transition-colors mb-2 ${
-                          isMarketing ? 'text-slate-700 group-hover:text-amber-600' : 'text-[#1F2937] group-hover:text-[#3B82F6]'
-                        }`}>
-                          {workshop.offering.title}
-                        </h3>
-                        <div className="flex flex-col gap-2.5 mt-4">
-                          <div className="flex items-center gap-2 text-[#6B7280]">
-                            <Calendar className={`w-4 h-4 ${isMarketing ? 'text-amber-500' : 'text-[#3B82F6]'}`} />
-                            <span className={`text-[13px] font-medium font-sans ${isMarketing ? 'text-amber-600/70 italic' : ''}`}>
-                              {workshop.offering.workshopSessions[0]
-                                ? new Date(workshop.offering.workshopSessions[0].scheduledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                                : 'No Session Scheduled'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[#6B7280]">
-                            <Users className={`w-4 h-4 ${isMarketing ? 'text-amber-500' : 'text-[#3B82F6]'}`} />
-                            <span className="text-[13px] font-medium">
-                              {workshop.maxSeats ? `${workshop.maxSeats} seats max` : 'Unlimited seats'}
-                            </span>
-                          </div>
+                        {workshop.offering._count.registrations > 0 && (
+                          <Badge className="bg-[#FFF7ED] text-[#EA580C] border-[#FFEDD5] text-[10px] font-bold">
+                            {workshop.offering._count.registrations} Leads
+                          </Badge>
+                        )}
+                      </div>
+                      <h3 className="text-lg font-bold text-[#1F2937] line-clamp-2 min-h-[3.5rem] group-hover:text-[#3B82F6] transition-colors mb-2">
+                        {workshop.offering.title}
+                      </h3>
+                      <div className="flex flex-col gap-2.5 mt-4">
+                        <div className="flex items-center gap-2 text-[#6B7280]">
+                          <Calendar className="w-4 h-4 text-[#3B82F6]" />
+                          <span className="text-[13px] font-medium font-sans">
+                            {workshop.offering.workshopSessions[0]
+                              ? new Date(workshop.offering.workshopSessions[0].scheduledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                              : 'Not scheduled'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[#6B7280]">
+                          <Users className="w-4 h-4 text-[#3B82F6]" />
+                          <span className="text-[13px] font-medium">
+                            {workshop.maxSeats ? `${workshop.maxSeats} seats max` : 'Unlimited seats'}
+                          </span>
                         </div>
                       </div>
-                      <div className={`p-4 border-t flex items-center justify-between transition-colors ${
-                        isMarketing ? 'bg-amber-50/50 border-amber-100' : 'p-4 border-t border-[#F3F4F6] bg-[#F9FAFB] group-hover:bg-[#F3F4F6]'
-                      }`}>
-                        <div className={`text-[12px] font-bold flex items-center gap-1 ${isMarketing ? 'text-amber-600' : 'text-[#3B82F6]'}`}>
-                          View Leads & Details <ExternalLink className="w-3 h-3" />
-                        </div>
+                    </div>
+                    <div className="p-4 border-t border-[#F3F4F6] bg-[#F9FAFB] flex items-center justify-between group-hover:bg-[#F3F4F6] transition-colors">
+                      <div className="text-[12px] font-bold text-[#3B82F6] flex items-center gap-1">
+                        View Details <ExternalLink className="w-3 h-3" />
                       </div>
-                    </Card>
-                  );
-                })
+                    </div>
+                  </Card>
+                ))
               )}
             </div>
           </section>
-            </div>
-          )}
 
-          {selectedFormat !== 'workshop' && (
-            <div className="animate-in fade-in duration-500 flex flex-col gap-8">
           {/* Chatbot Interaction Stats Section */}
-          <section id="chatbot-stats" className="mt-0 space-y-4">
+          <section id="chatbot-stats" className="mt-8 space-y-4">
             <div>
               <p className="text-[9px] font-bold uppercase tracking-[0.3em] text-[#718096]">Chatbot Analytics</p>
               <h2 className="text-xl font-semibold text-[#1A202C]">Learner Chatbot Interactions</h2>
@@ -3295,8 +2815,6 @@ export default function TutorDashboardPage() {
               </form>
             </DialogContent>
           </Dialog>
-            </div>
-          )}
         </div>
       </div>
     </SiteLayout>

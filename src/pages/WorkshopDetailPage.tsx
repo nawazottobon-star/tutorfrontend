@@ -8,8 +8,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
     ChevronLeft, Calendar, Video, Users, ExternalLink, ClipboardList,
     Mail, Info, X, Check, Loader2, Pencil, Save, Plus, Trash2,
-    AlertTriangle, Clock, CheckCircle2, XCircle, Zap,
+    AlertTriangle, Clock, CheckCircle2, XCircle, Zap, Sparkles
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 
 interface Registration {
     registrationId: string;
@@ -17,7 +21,7 @@ interface Registration {
     email: string;
     phoneNumber: string;
     collegeName: string;
-    status: "pending" | "approved" | "rejected";
+    status: "pending" | "assessed" | "approved" | "rejected";
     createdAt: string;
     answersJson: any;
 }
@@ -37,6 +41,12 @@ export default function WorkshopDetailPage() {
 
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [activeSection, setActiveSection] = useState<"submissions" | "questions">("submissions");
+    const [viewAnswersReg, setViewAnswersReg] = useState<Registration | null>(null);
+
+    /* ── custom approval state ─────────────────────────── */
+    const [customApprovalReg, setCustomApprovalReg] = useState<Registration | null>(null);
+    const [customEmailContent, setCustomEmailContent] = useState("");
+    const [isCustomApprovalModalOpen, setIsCustomApprovalModalOpen] = useState(false);
 
     /* ── queries ─────────────────────────────────────── */
     const { data: workshopData, isLoading: wLoading } = useQuery({
@@ -67,15 +77,19 @@ export default function WorkshopDetailPage() {
     });
 
     const registrations: Registration[] = regsData?.registrations ?? [];
-    const pending = registrations.filter((r) => r.status === "pending");
+    // treat 'assessed' as pending (legacy status from public form)
+    const pending = registrations.filter((r) => r.status === "pending" || r.status === "assessed");
     const approved = registrations.filter((r) => r.status === "approved");
     const rejected = registrations.filter((r) => r.status === "rejected");
 
+
     /* ── status mutation ─────────────────────────────── */
     const statusM = useMutation({
-        mutationFn: async ({ regId, status }: { regId: string; status: string }) => {
+        mutationFn: async ({ regId, status, customEmail }: { regId: string; status: string; customEmail?: string }) => {
             const r = await fetch(`${API_BASE_URL}/api/workshops/${id}/registrations/${regId}`, {
-                method: "PATCH", headers, body: JSON.stringify({ status }),
+                method: "PATCH", 
+                headers, 
+                body: JSON.stringify({ status, customEmail }),
             });
             if (!r.ok) throw new Error("failed");
             return r.json();
@@ -83,6 +97,8 @@ export default function WorkshopDetailPage() {
         onSuccess: (_, v) => {
             qc.invalidateQueries({ queryKey: ["regs", id] });
             toast({ title: v.status === "approved" ? "✅ Approved — email sent!" : "❌ Application rejected" });
+            setIsCustomApprovalModalOpen(false);
+            setCustomApprovalReg(null);
         },
     });
 
@@ -207,7 +223,8 @@ export default function WorkshopDetailPage() {
     const currentSession = sessions.find((s: any) => s.sessionId === activeSessionId) ?? sessions[0];
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <>
+            <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
 
             {/* ══════════════════════════════════════════════
                 HERO HEADER — full-width, crystal clear
@@ -262,6 +279,18 @@ export default function WorkshopDetailPage() {
             </div>
 
             <div className="max-w-6xl mx-auto px-6 py-6 space-y-5">
+                {workshop?.type === 'marketing' && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 animate-in fade-in slide-in-from-top-4 duration-500">
+                        <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-bold text-amber-800">Marketing Draft Workshop</p>
+                            <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                                This workshop was created directly in the database. Formal session details like Google Meet links and seat limits are not yet configured. 
+                                <strong> Custom approval emails</strong> are recommended to provide payment and joining details manually.
+                            </p>
+                        </div>
+                    </div>
+                )}
 
                 {/* ══════════════════════════════════════════════
                     INFO STRIP — 3 key facts in one scannable row
@@ -347,8 +376,7 @@ export default function WorkshopDetailPage() {
                     <div className="flex items-center gap-3 px-5 py-3 bg-amber-50 border border-amber-200 rounded-2xl">
                         <Clock className="w-4 h-4 text-amber-500 shrink-0" />
                         <p className="text-sm font-semibold text-amber-800">
-                            <span className="font-black">{pending.length} application{pending.length > 1 ? "s" : ""} waiting for your review.</span> {" "}
-                            Hover a row below to approve or reject.
+                            <span className="font-black">{pending.length} application{pending.length > 1 ? "s" : ""} waiting for your review.</span>
                         </p>
                     </div>
                 )}
@@ -404,50 +432,22 @@ export default function WorkshopDetailPage() {
                                                     {/* View Answers button */}
                                                     <button
                                                         className="mt-1 flex items-center gap-1 text-[11px] font-bold text-indigo-500 hover:text-indigo-700 transition-colors"
-                                                        onClick={() => {
-                                                            const answers: any[] = reg.answersJson ?? [];
-                                                            const questions: any[] = workshop?.offering.questions ?? [];
-                                                            toast({
-                                                                title: `${reg.fullName}'s Application`,
-                                                                description: (
-                                                                    <div className="space-y-4 mt-2 max-h-[55vh] overflow-y-auto pr-1">
-                                                                        {answers.map((ans: any, i: number) => {
-                                                                            const q = questions.find((q: any) => q.questionNumber === ans.questionNumber);
-                                                                            const isText = !q || q.questionType === "text";
-                                                                            const opts: string[] = q?.mcqOptions ?? [];
-                                                                            return (
-                                                                                <div key={i} className="space-y-1.5">
-                                                                                    <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Q{ans.questionNumber}</p>
-                                                                                    <p className="text-sm font-bold text-slate-700">{ans.questionText}</p>
-                                                                                    {isText ? (
-                                                                                        <div className="px-3 py-2 bg-slate-50 rounded-lg text-sm text-slate-600">{ans.answer}</div>
-                                                                                    ) : (
-                                                                                        <div className="flex flex-wrap gap-1.5">
-                                                                                            {opts.map((opt, j) => (
-                                                                                                <span key={j} className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${opt === ans.answer ? "bg-indigo-500 text-white border-indigo-500" : "bg-white text-slate-400 border-slate-200"}`}>{opt}</span>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                ),
-                                                            });
-                                                        }}
+                                                        onClick={() => setViewAnswersReg(reg)}
                                                     >
                                                         <Info className="w-3 h-3" /> View answers
                                                     </button>
+
                                                 </td>
                                                 <td className="py-4 text-center">
                                                     <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider ${reg.status === "approved" ? "bg-emerald-100 text-emerald-700" : reg.status === "rejected" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-700"}`}>
                                                         {reg.status === "approved" ? <CheckCircle2 className="w-3 h-3" /> : reg.status === "rejected" ? <XCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                                                        {reg.status}
+                                                        {reg.status === "assessed" ? "pending" : reg.status}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-right">
-                                                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all duration-200">
-                                                        {reg.status === "pending" ? (
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        {(reg.status === "pending" || reg.status === "assessed") ? (
+
                                                             <>
                                                                 <button
                                                                     title="Reject"
@@ -458,7 +458,36 @@ export default function WorkshopDetailPage() {
                                                                 </button>
                                                                 <button
                                                                     title="Approve"
-                                                                    onClick={() => statusM.mutate({ regId: reg.registrationId, status: "approved" })}
+                                                                    onClick={() => {
+                                                                        if (workshop?.type === 'marketing') {
+                                                                            setCustomApprovalReg(reg);
+                                                                            setCustomEmailContent(`
+<div style="font-family: sans-serif; line-height: 1.6; color: #333;">
+    <h2 style="color: #4F46E5;">Congratulations! 🎉</h2>
+    <p>Hi ${reg.fullName},</p>
+    <p>Your application for the workshop <strong>"${workshop?.offering.title}"</strong> has been approved.</p>
+    
+    <div style="background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; margin: 20px 0;">
+        <p style="margin: 0; color: #64748b; font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em;">Payment Instructions</p>
+        <p style="margin: 10px 0 0 0;">Please complete the payment to secure your seat. You can use the link or QR code below:</p>
+        <p style="margin: 10px 0 0 0; font-weight: bold; color: #4F46E5;">[PASTE YOUR PAYMENT LINK HERE]</p>
+    </div>
+
+    <div style="background: #f0fdf4; padding: 20px; border-radius: 12px; border: 1px solid #bbf7d0; margin: 20px 0;">
+        <p style="margin: 0; color: #166534; font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em;">Joining Details</p>
+        <p style="margin: 10px 0 0 0;">Once payment is verified, you can join using this link:</p>
+        <p style="margin: 10px 0 0 0; font-weight: bold; color: #059669;">[PASTE GOOGLE MEET LINK HERE]</p>
+    </div>
+
+    <p>If you have any questions, feel free to reply to this email.</p>
+    <p>Best regards,<br/>Otto Learn Team</p>
+</div>
+                                                                            `.trim());
+                                                                            setIsCustomApprovalModalOpen(true);
+                                                                        } else {
+                                                                            statusM.mutate({ regId: reg.registrationId, status: "approved" });
+                                                                        }
+                                                                    }}
                                                                     disabled={statusM.isPending}
                                                                     className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-colors">
                                                                     <Check className="w-3.5 h-3.5" /> Approve
@@ -664,5 +693,130 @@ export default function WorkshopDetailPage() {
                 </DialogContent>
             </Dialog>
         </div>
+
+        {/* ── VIEW ANSWERS MODAL ─────────────────────── */}
+        <Dialog open={!!viewAnswersReg} onOpenChange={(open) => { if (!open) setViewAnswersReg(null); }}>
+            <DialogContent className="max-w-lg w-full max-h-[80vh] flex flex-col">
+                <DialogHeader>
+                    <DialogTitle className="text-lg font-black text-slate-800">
+                        {viewAnswersReg?.fullName}'s Application
+                    </DialogTitle>
+                    <p className="text-sm text-slate-400">{viewAnswersReg?.email}</p>
+                </DialogHeader>
+
+                {/* Answers */}
+                <div className="flex-1 overflow-y-auto space-y-5 py-2 pr-1">
+                    {(() => {
+                        const answersObj: Record<string, string> = viewAnswersReg?.answersJson ?? {};
+                        const questions: any[] = workshop?.offering.questions ?? [];
+                        const entries = Object.entries(answersObj);
+
+                        if (entries.length === 0) {
+                            return <p className="text-sm text-slate-400 text-center py-8">No answers submitted.</p>;
+                        }
+
+                        return entries.map(([qId, answerValue], i) => {
+                            const q = questions.find((q: any) => q.questionId === qId);
+                            const isText = !q || q.questionType === "text";
+                            const opts: string[] = q?.mcqOptions ?? [];
+                            return (
+                                <div key={i} className="space-y-1.5">
+                                    <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Q{i + 1}</p>
+                                    <p className="text-sm font-bold text-slate-700">{q?.questionText ?? `Question (ID: ${qId.slice(0, 8)}…)`}</p>
+                                    {isText ? (
+                                        <div className="px-3 py-2 bg-slate-50 rounded-lg text-sm text-slate-600 border border-slate-100">{answerValue}</div>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {opts.map((opt, j) => (
+                                                <span key={j} className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${opt === answerValue ? "bg-indigo-500 text-white border-indigo-500" : "bg-white text-slate-400 border-slate-200"}`}>{opt}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        });
+                    })()}
+                </div>
+
+                {/* Action buttons */}
+                {(viewAnswersReg?.status === "pending" || viewAnswersReg?.status === "assessed") && (
+                    <div className="flex gap-3 pt-4 border-t border-slate-100">
+                        <button
+                            onClick={() => { statusM.mutate({ regId: viewAnswersReg!.registrationId, status: "rejected" }); setViewAnswersReg(null); }}
+                            disabled={statusM.isPending}
+                            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 text-sm font-bold transition-colors"
+                        >
+                            <X className="w-4 h-4" /> Reject
+                        </button>
+                        <button
+                            onClick={() => { statusM.mutate({ regId: viewAnswersReg!.registrationId, status: "approved" }); setViewAnswersReg(null); }}
+                            disabled={statusM.isPending}
+                            className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold transition-colors"
+                        >
+                            <Check className="w-4 h-4" /> Approve
+                        </button>
+                    </div>
+                )}
+                {(viewAnswersReg?.status === "approved" || viewAnswersReg?.status === "rejected") && (
+                    <div className="pt-4 border-t border-slate-100 text-center">
+                        <span className={`text-sm font-bold ${viewAnswersReg.status === "approved" ? "text-emerald-600" : "text-red-500"}`}>
+                            {viewAnswersReg.status === "approved" ? "✅ Already Approved" : "❌ Already Rejected"}
+                        </span>
+                    </div>
+                )}
+            </DialogContent>
+        </Dialog>
+        {/* ── CUSTOM APPROVAL MODAL ────────────────── */}
+        <Dialog open={isCustomApprovalModalOpen} onOpenChange={setIsCustomApprovalModalOpen}>
+            <DialogContent className="max-w-2xl w-full">
+                <DialogHeader>
+                    <div className="flex items-center gap-2 mb-1">
+                        <Sparkles className="w-4 h-4 text-emerald-500" />
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Custom Approval</p>
+                    </div>
+                    <DialogTitle className="text-xl font-black text-slate-800">
+                        Compose Approval Email
+                    </DialogTitle>
+                    <p className="text-sm text-slate-400">
+                        Approving <strong>{customApprovalReg?.fullName}</strong>. Review and customize the approval details below.
+                    </p>
+                </DialogHeader>
+
+                <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500 uppercase">Email Content (HTML Supported)</Label>
+                        <Textarea 
+                            value={customEmailContent}
+                            onChange={(e) => setCustomEmailContent(e.target.value)}
+                            className="min-h-[300px] font-mono text-xs leading-relaxed border-slate-200 focus:border-indigo-400 focus:ring-indigo-400"
+                            placeholder="Type your custom email here..."
+                        />
+                    </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                    <Button 
+                        variant="outline" 
+                        onClick={() => setIsCustomApprovalModalOpen(false)}
+                        className="flex-1 rounded-xl h-11 font-bold border-slate-200 text-slate-500"
+                    >
+                        Cancel
+                    </Button>
+                    <Button 
+                        onClick={() => statusM.mutate({ 
+                            regId: customApprovalReg!.registrationId, 
+                            status: "approved",
+                            customEmail: customEmailContent
+                        })}
+                        disabled={statusM.isPending}
+                        className="flex-1 bg-emerald-500 hover:bg-emerald-600 rounded-xl h-11 font-bold text-white shadow-lg shadow-emerald-100"
+                    >
+                        {statusM.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Check className="w-4 h-4 mr-2" />}
+                        Approve & Send Email
+                    </Button>
+                </div>
+            </DialogContent>
+        </Dialog>
+        </>
     );
 }
