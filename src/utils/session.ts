@@ -5,6 +5,8 @@ import { queryClient } from '@/lib/queryClient';
 const STORAGE_KEY = 'session';
 const USER_KEY = 'user';
 const AUTH_FLAG_KEY = 'isAuthenticated';
+const ADMIN_TOKEN_KEY = 'admin_token';
+const ADMIN_USER_KEY = 'admin_user';
 const REFRESH_BUFFER_MS = 60_000;
 const MIN_REFRESH_DELAY_MS = 15_000;
 
@@ -33,6 +35,19 @@ export const readStoredSession = (): StoredSession | null => {
 
 export const writeStoredSession = (session: StoredSession): void => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+};
+
+export const writeAdminSession = (token: string, user: any): void => {
+  localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(user));
+  localStorage.setItem(AUTH_FLAG_KEY, 'true');
+};
+
+export const readAdminSession = () => {
+  const token = localStorage.getItem(ADMIN_TOKEN_KEY);
+  const user = localStorage.getItem(ADMIN_USER_KEY);
+  if (!token || !user) return null;
+  return { token, user: JSON.parse(user) };
 };
 
 export const clearStoredSession = (): void => {

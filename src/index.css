@@ -1133,3 +1133,28 @@
 .scrollbar-thin:hover::-webkit-scrollbar-thumb {
   background-color: #CBD5E0;
 }
+/* PREMIUM FORM STYLES */
+.form-premium-input {
+  @apply w-full bg-white border border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-lg px-3 py-1.5 text-[12px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-1 focus:ring-[#B24531]/5 transition-all;
+}
+
+select.form-premium-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23B24531'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1.5rem center;
+  background-size: 1rem;
+  padding-right: 3.5rem;
+}
+
+.step-active {
+  @apply bg-[#B24531] text-white scale-110 shadow-lg;
+}
+
+.step-complete {
+  @apply bg-emerald-500 text-white;
+}
+
+.step-inactive {
+  @apply bg-[#1E3A47]/10 text-[#1E3A47]/40;
+}
+

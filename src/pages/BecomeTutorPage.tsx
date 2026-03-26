@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { motion, useScroll, useTransform, useInView, AnimatePresence } from 'framer-motion';
 import { buildApiUrl } from "@/lib/api";
-import { writeStoredSession, resetSessionHeartbeat } from '@/utils/session';
+import { writeStoredSession, writeAdminSession, resetSessionHeartbeat } from '@/utils/session';
 import type { StoredSession } from '@/types/session';
 import FloatingCampusHero from '@/components/layout/FloatingCampusHero';
 import WaveGallery from '@/components/layout/WaveGallery';
@@ -31,17 +31,46 @@ import 'lenis/dist/lenis.css';
 
 // --- 1. TYPES & INTERFACES ---
 interface TutorApplication {
+  // Step 1: Who You Are
   fullName: string;
   email: string;
   phone: string;
-  headline: string;
-  expertiseArea: string;
-  yearsExperience: number;
-  courseTitle: string;
+  city: string;
+  timezone: string;
+
+  // Step 2: Your Expertise
+  expertise_streams: string[];
+  expertise_other_text: string;
+  years_of_experience: number;
+  linkedin_url: string;
+  bio: string;
+
+  // Step 3: Your Course Idea
+  course_title: string;
   availability: string;
-  courseDescription: string;
-  targetAudience: string;
+  teaching_formats: string[];
+  course_description: string;
+  target_audience: string;
+
+  // Step 4: How You'll Earn
+  payment_model: 'commission' | 'subscription';
+  payout_method: string;
+  agreed_to_terms: boolean;
+
+  // Legacy/Compatibility
+  headline?: string;
+  expertiseArea?: string;
 }
+
+const EXPERTISE_STREAMS = ['Tech', 'Business', 'Design', 'Marketing', 'Product', 'Other'];
+const TEACHING_FORMATS = ['Live Sessions', 'Recorded Video', '1-on-1 Mentorship', 'Project-based Coaching'];
+const PAYOUT_METHODS = ['Bank Transfer', 'UPI', 'PayPal'];
+const TIMEZONES = [
+  'UTC-05:00 (EST)', 'UTC-08:00 (PST)', 'UTC+00:00 (GMT)', 'UTC+05:30 (IST)', 'UTC+09:00 (JST)'
+];
+const AVAILABILITY_OPTIONS = ['Full-time', 'Part-time', 'Weekends', 'Flexible'];
+
+const STORAGE_KEY = 'tutor_application_draft';
 
 // --- 2. Description helper (client-safe template) ---
 const THEME = {
@@ -81,36 +110,21 @@ const GrainOverlay = () => (
 
 
 const SectionHeader = ({ badge, title, subline, light = false }: { badge?: string; title: React.ReactNode; subline?: string; light?: boolean }) => (
-  <div className="mb-4 text-center max-w-3xl mx-auto">
+  <div className="mb-2 text-center max-w-3xl mx-auto">
     {badge && (
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
-        className={`inline-flex items-center gap-2 px-3 py-1 rounded-full mb-6 text-[10px] font-black uppercase tracking-[0.2em] ${light ? 'bg-white/10 text-white/80' : 'bg-[#B24531]/10 text-[#B24531]'}`}
+        className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-2 ${
+          light ? 'bg-white/10 text-white' : 'bg-[#B24531]/10 text-[#B24531]'
+        }`}
       >
         {badge}
       </motion.div>
     )}
-    <motion.h3
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      className={`text-4xl md:text-5xl font-black tracking-tight mb-4 ${light ? 'text-white' : 'text-[#1E3A47]'}`}
-    >
-      {title}
-    </motion.h3>
-    {subline && (
-      <motion.p
-        initial={{ opacity: 0, y: 20 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ delay: 0.1 }}
-        className={`text-base md:text-lg font-medium max-w-2xl mx-auto leading-relaxed ${light ? 'text-white/60' : 'text-[#1E3A47]/60'}`}
-      >
-        {subline}
-      </motion.p>
-    )}
+    <h2 className={`text-2xl md:text-3xl font-black mb-1 leading-tight ${light ? 'text-white' : 'text-[#1E3A47]'}`}>{title}</h2>
+    {subline && <p className={`text-xs font-bold opacity-70 ${light ? 'text-white' : 'text-[#1E3A47]'}`}>{subline}</p>}
   </div>
 );
 
@@ -187,17 +201,39 @@ const initialFormState: TutorApplication = {
   fullName: "",
   email: "",
   phone: "",
-  headline: "",
-  expertiseArea: "",
-  yearsExperience: 0,
-  courseTitle: "",
-  availability: "",
-  courseDescription: "",
-  targetAudience: "",
+  city: "",
+  timezone: TIMEZONES[3], // IST default
+  expertise_streams: [],
+  expertise_other_text: "",
+  years_of_experience: 0,
+  linkedin_url: "",
+  bio: "",
+  course_title: "",
+  availability: "Flexible",
+  teaching_formats: [],
+  course_description: "",
+  target_audience: "",
+  payment_model: 'commission',
+  payout_method: "Bank Transfer",
+  agreed_to_terms: false,
 };
 
 const BecomeTutor: React.FC = () => {
-  const [formData, setFormData] = useState<TutorApplication>({ ...initialFormState });
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState<TutorApplication>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return { ...initialFormState };
+    try {
+      const parsed = JSON.parse(saved);
+      // Merge and ensure arrays
+      const merged = { ...initialFormState, ...parsed };
+      if (!Array.isArray(merged.expertise_streams)) merged.expertise_streams = [];
+      if (!Array.isArray(merged.teaching_formats)) merged.teaching_formats = [];
+      return merged;
+    } catch (e) {
+      return { ...initialFormState };
+    }
+  });
   const [, setLocation] = useLocation();
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -208,8 +244,14 @@ const BecomeTutor: React.FC = () => {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
   const [activeItem, setActiveItem] = useState<number | null>(null);
   const lenisRef = useRef<Lenis | null>(null);
+
+  // Auto-save to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
+  }, [formData]);
 
   useEffect(() => {
     const lenis = new Lenis({
@@ -284,23 +326,38 @@ const BecomeTutor: React.FC = () => {
 
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
+    const { name, value, type } = e.target;
+    const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
+    
     setFormData((prev: TutorApplication) => ({
       ...prev,
-      [name]: value
+      [name]: val
     }));
   };
 
+  const handleMultiSelect = (name: keyof TutorApplication, value: string) => {
+    setFormData(prev => {
+      const current = prev[name] as string[];
+      if (current.includes(value)) {
+        return { ...prev, [name]: current.filter(v => v !== value) };
+      }
+      return { ...prev, [name]: [...current, value] };
+    });
+  };
+
   const handleAiGenerate = async () => {
-    if (!formData.courseTitle || !formData.expertiseArea) {
-      alert("Please enter a Course Title and Area of Expertise first.");
+    if (!formData.course_title || (formData.expertise_streams.length === 0 && !formData.expertise_other_text)) {
+      alert("Please enter a Course Title and select/enter your Expertise first.");
       return;
     }
 
     setIsGenerating(true);
     try {
-      const description = await generateCourseDescription(formData.courseTitle, formData.expertiseArea);
-      setFormData(prev => ({ ...prev, courseDescription: description }));
+      const expertiseLabel = formData.expertise_streams.includes('Other') 
+        ? formData.expertise_other_text 
+        : formData.expertise_streams[0];
+      const description = await generateCourseDescription(formData.course_title, expertiseLabel);
+      setFormData(prev => ({ ...prev, course_description: description }));
     } catch (error) {
       console.error("AI Generation failed", error);
     } finally {
@@ -357,6 +414,13 @@ const BecomeTutor: React.FC = () => {
 
       localStorage.setItem("user", JSON.stringify(userPayload));
       localStorage.setItem("isAuthenticated", "true");
+      
+      if (payload.user?.role === 'admin') {
+        writeAdminSession(payload.session?.accessToken, payload.user);
+        closeLoginModal();
+        setLocation('/admin');
+        return;
+      }
 
       closeLoginModal();
       setLocation("/tutors");
@@ -367,29 +431,37 @@ const BecomeTutor: React.FC = () => {
     }
   };
 
+  const nextStep = () => setCurrentStep(prev => Math.min(prev + 1, 4));
+  const prevStep = () => setCurrentStep(prev => Math.max(prev - 1, 1));
+
+  const getCourseSuggestions = () => {
+    if (formData.expertise_streams.length === 0) return [];
+    const stream = formData.expertise_streams[0];
+    const suggestions: Record<string, string[]> = {
+      'Tech': ['Full-Stack Web Development', 'AI & Machine Learning Foundations', 'Cloud Architecture Masterclass'],
+      'Business': ['Strategic Management', 'Digital Marketing Zero to Hero', 'Financial Modeling for Startups'],
+      'Design': ['UI/UX Design Essentials', 'Motion Graphics Workshop', 'Brand Identity Design'],
+      'Marketing': ['Growth Hacking 101', 'Social Media Strategy', 'B2B Content Marketing'],
+      'Product': ['Product Management Level Up', 'Agile & Scrum Practices', 'User Research Methodologies'],
+    };
+    return suggestions[stream] || [`Advanced ${stream} Concepts`, `The Complete ${stream} Guide`];
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentStep < 4) {
+      nextStep();
+      return;
+    }
+
     setSubmitMessage(null);
     setIsSubmitting(true);
-
-    const payload = {
-      fullName: formData.fullName.trim(),
-      email: formData.email.trim(),
-      phone: formData.phone?.trim() || undefined,
-      headline: formData.headline.trim(),
-      courseTitle: formData.courseTitle.trim(),
-      courseDescription: formData.courseDescription.trim(),
-      targetAudience: formData.targetAudience.trim(),
-      expertiseArea: formData.expertiseArea.trim(),
-      experienceYears: Number(formData.yearsExperience) || 0,
-      availability: formData.availability.trim(),
-    };
 
     try {
       const res = await fetch("/api/tutor-applications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(formData),
       });
 
       if (!res.ok) {
@@ -397,7 +469,8 @@ const BecomeTutor: React.FC = () => {
         throw new Error(error?.message ?? "Failed to submit tutor application.");
       }
 
-      setSubmitMessage("Proposal submitted successfully! Our team will be in touch soon.");
+      setIsSubmitted(true);
+      localStorage.removeItem(STORAGE_KEY);
       setFormData({ ...initialFormState });
     } catch (error) {
       setSubmitMessage(error instanceof Error ? error.message : "Submission failed. Please try again.");
@@ -558,7 +631,7 @@ const BecomeTutor: React.FC = () => {
         />
       </motion.section>
 
-      <div className="relative h-24 w-full -mt-12 mb-[-1px] z-20 pointer-events-none overflow-hidden">
+      <div className="relative h-10 w-full -mt-6 mb-[-1px] z-20 pointer-events-none overflow-hidden">
         {/* Layered Liquid Waves - Timeline to Form Transition */}
         <svg viewBox="0 0 1440 120" className="absolute bottom-[-1px] w-full h-full" preserveAspectRatio="none">
           <path
@@ -579,180 +652,333 @@ const BecomeTutor: React.FC = () => {
       </div>
 
 
-      {/* Application Form Section */}
       <motion.section
         id="apply"
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, amount: 0.05 }}
         variants={revealVariants}
-        className="pt-4 pb-24 px-6 md:px-12 relative scroll-mt-24 bg-gradient-to-b from-[#FFF5EC] to-[#FFD8B1]/30"
+        className="py-2 px-6 md:px-12 relative scroll-mt-24 bg-gradient-to-b from-[#FFF5EC] to-[#FFD8B1]/30"
       >
-        <div className="max-w-[1400px] mx-auto relative z-10">
-          <SectionHeader
-            badge="Join the Team"
-            title={
-              <>
-                Ready to make an <span className="highlight-premium">impact</span>?
-              </>
-            }
-            subline="Fill out the form below to apply. We review every application personally."
-          />
+        <div className="max-w-[1000px] mx-auto relative z-10">
+          <div className="text-center mb-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#B24531]">Join the Team</span>
+            <h2 className="text-xl md:text-2xl font-black text-[#1E3A47]">Ready to make an <span className="highlight-premium px-2">impact</span>?</h2>
+          </div>
 
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
-            className="bg-white rounded-[3rem] p-8 md:p-16 shadow-2xl shadow-black/20 border border-white/10"
+            className="bg-white rounded-xl p-4 md:px-8 md:py-4 shadow-2xl shadow-black/20 border border-white/10"
           >
-            <form onSubmit={handleSubmit} className="space-y-16">
-              {/* Personal Details */}
-              <div className="space-y-8">
-                <div className="flex items-center gap-4 border-b border-[#1E3A47]/10 pb-4">
-                  <ShieldCheck className="w-5 h-5 text-[#B24531]" />
-                  <h4 className="text-[15px] font-black uppercase tracking-widest text-[#B24531]">Personal Details</h4>
+            {isSubmitted ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="py-12 text-center"
+              >
+                <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle2 size={32} />
                 </div>
+                <h3 className="text-2xl font-black text-[#1E3A47] mb-2">Proposal Submitted!</h3>
+                <p className="text-[#1E3A47]/60 max-w-md mx-auto mb-8 font-medium">
+                  Thank you for applying to Ottolearn. Our academic review team will verify your proposal personally and get back to you within 48 hours.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsSubmitted(false)}
+                  className="px-8 py-3 bg-[#1E3A47] text-white rounded-xl font-black uppercase tracking-widest text-xs hover:bg-[#B24531] transition-all shadow-xl"
+                >
+                  Submit Another Proposal
+                </button>
+              </motion.div>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Step Indicator */}
+            <div className="flex justify-between items-center mb-4 px-1 gap-2 border-b border-[#1E3A47]/5 pb-3">
+              {[1, 2, 3, 4].map((step) => (
+                <div key={step} className="flex items-center gap-2">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-[10px] transition-all ${
+                    currentStep === step ? 'bg-[#B24531] text-white scale-110' : 
+                    currentStep > step ? 'bg-emerald-500 text-white' : 'bg-[#1E3A47]/10 text-[#1E3A47]/40'
+                  }`}>
+                    {currentStep > step ? <CheckCircle2 size={12} /> : step}
+                  </div>
+                  <span className={`text-[10px] font-black uppercase tracking-widest hidden lg:block ${currentStep === step ? 'text-[#B24531]' : 'text-[#1E3A47]/40'}`}>
+                    {['Bio', 'Expertise', 'Course', 'Financial'][step - 1]}
+                  </span>
+                </div>
+              ))}
+            </div>
 
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-                  {[
-                    { label: 'Full Name', name: 'fullName', type: 'text', placeholder: 'John Doe' },
-                    { label: 'Email Address', name: 'email', type: 'email', placeholder: 'john@example.com' },
-                    { label: 'Phone Number', name: 'phone', type: 'tel', placeholder: '+1 (555) 000-0000' },
-                    { label: 'Professional Headline', name: 'headline', type: 'text', placeholder: 'Sr. AI Engineer' }
-                  ].map((field) => (
-                    <div key={field.name} className="space-y-2">
-                      <label className="text-[13px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">{field.label}</label>
-                      <input
-                        type={field.type}
-                        name={field.name}
-                        value={(formData as any)[field.name]}
-                        onChange={handleChange}
-                        className="w-full bg-white border-2 border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-2xl px-6 py-4 text-[18px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-4 focus:ring-[#B24531]/5 transition-all"
-                        placeholder={field.placeholder}
-                      />
+              <AnimatePresence mode="wait">
+                {currentStep === 1 && (
+                  <motion.div
+                    key="step1"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center gap-2 border-b border-[#1E3A47]/10 pb-2">
+                      <ShieldCheck className="w-4 h-4 text-[#B24531]" />
+                      <h4 className="text-[12px] font-black uppercase tracking-widest text-[#B24531]">Step 1: Who You Are</h4>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Expertise & Proposal */}
-              <div className="space-y-8">
-                <div className="flex items-center gap-4 border-b border-[#1E3A47]/10 pb-4">
-                  <Brain className="w-5 h-5 text-[#B24531]" />
-                  <h4 className="text-[15px] font-black uppercase tracking-widest text-[#B24531]">Expertise & Proposal</h4>
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-8">
-                  <div className="space-y-2">
-                    <label className="text-[13px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Area of Expertise</label>
-                    <input
-                      type="text"
-                      name="expertiseArea"
-                      value={formData.expertiseArea}
-                      onChange={handleChange}
-                      className="w-full bg-white border-2 border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-2xl px-6 py-4 text-[18px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-4 focus:ring-[#B24531]/5 transition-all"
-                      placeholder="e.g. LLMs, Python, Computer Vision"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[13px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Years of Experience</label>
-                    <input
-                      type="number"
-                      name="yearsExperience"
-                      value={formData.yearsExperience}
-                      onChange={handleChange}
-                      className="w-full bg-white border-2 border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-2xl px-6 py-4 text-[18px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-4 focus:ring-[#B24531]/5 transition-all"
-                      placeholder="e.g. 5"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[13px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Proposed Course Title</label>
-                    <input
-                      type="text"
-                      name="courseTitle"
-                      value={formData.courseTitle}
-                      onChange={handleChange}
-                      className="w-full bg-white border-2 border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-2xl px-6 py-4 text-[18px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-4 focus:ring-[#B24531]/5 transition-all"
-                      placeholder="e.g. Advanced RAG Systems"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[13px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Availability</label>
-                    <div className="relative">
-                      <select
-                        name="availability"
-                        value={formData.availability}
-                        onChange={handleChange}
-                        className="w-full bg-white border-2 border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-2xl px-6 py-4 text-[18px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-4 focus:ring-[#B24531]/5 transition-all cursor-pointer"
-                      >
-                        <option value="">Select availability</option>
-                        <option value="immediate">Immediately</option>
-                        <option value="1month">In 1 month</option>
-                        <option value="3months">In 3 months</option>
-                      </select>
-                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-[#B24531]">
-                        <ArrowRight className="w-4 h-4 rotate-90" />
+                    <div className="grid md:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Full Name</label>
+                        <input type="text" name="fullName" value={formData.fullName} onChange={handleChange} required className="form-premium-input" placeholder="Your legal name" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Email Address</label>
+                        <input type="email" name="email" value={formData.email} onChange={handleChange} required className="form-premium-input" placeholder="you@example.com" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Phone Number</label>
+                        <input type="tel" name="phone" value={formData.phone} onChange={handleChange} required className="form-premium-input" placeholder="+1 (555) 000-0000" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">City</label>
+                        <input type="text" name="city" value={formData.city} onChange={handleChange} required className="form-premium-input" placeholder="Bangalore, India" />
+                      </div>
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Timezone</label>
+                        <select name="timezone" value={formData.timezone} onChange={handleChange} required className="form-premium-input appearance-none">
+                          {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                        </select>
                       </div>
                     </div>
-                  </div>
-                </div>
+                  </motion.div>
+                )}
 
-                <div className="grid md:grid-cols-2 gap-8">
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center px-1">
-                      <label className="text-[13px] font-black uppercase tracking-wider text-[#1E3A47]/40">Course Description</label>
-                      <button
-                        type="button"
-                        onClick={handleAiGenerate}
-                        disabled={isGenerating}
-                        className="flex items-center gap-2 text-xs font-black text-[#B24531] hover:text-[#E64833] disabled:opacity-50 transition-colors uppercase tracking-widest bg-[#B24531]/5 px-3 py-1 rounded-full"
-                      >
-                        {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                        {isGenerating ? 'Thinking...' : 'AI Assist'}
-                      </button>
+                {currentStep === 2 && (
+                  <motion.div
+                    key="step2"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center gap-2 border-b border-[#1E3A47]/10 pb-2">
+                      <Brain className="w-4 h-4 text-[#B24531]" />
+                      <h4 className="text-[12px] font-black uppercase tracking-widest text-[#B24531]">Step 2: Your Expertise</h4>
                     </div>
-                    <textarea
-                      name="courseDescription"
-                      rows={4}
-                      value={formData.courseDescription}
-                      onChange={handleChange}
-                      className="w-full bg-white border-2 border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-2xl px-6 py-4 text-[18px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-4 focus:ring-[#B24531]/5 transition-all resize-none"
-                      placeholder="Briefly describe the curriculum..."
-                    />
-                  </div>
-                  <div className="space-y-4">
-                    <label className="text-[13px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1 pt-1 block">Target Audience</label>
-                    <textarea
-                      name="targetAudience"
-                      rows={4}
-                      value={formData.targetAudience}
-                      onChange={handleChange}
-                      className="w-full bg-white border-2 border-[#1E3A47]/10 focus:border-[#B24531]/20 rounded-2xl px-6 py-4 text-[18px] text-[#1E3A47] font-bold placeholder-[#1E3A47]/20 focus:outline-none focus:ring-4 focus:ring-[#B24531]/5 transition-all resize-none"
-                      placeholder="Who is this for?"
-                    />
+                    <div className="space-y-6">
+                      <div className="space-y-4">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Expertise Streams (Select 1 or more)</label>
+                        <div className="flex flex-wrap gap-2">
+                          {EXPERTISE_STREAMS.map(stream => (
+                            <button
+                              key={stream}
+                              type="button"
+                              onClick={() => handleMultiSelect('expertise_streams', stream)}
+                              className={`px-3 py-1.5 rounded-lg border font-bold text-[10px] transition-all ${
+                                formData.expertise_streams.includes(stream) ? 'bg-[#B24531] border-[#B24531] text-white' : 'border-[#1E3A47]/10 text-[#1E3A47] hover:border-[#B24531]/20'
+                              }`}
+                            >
+                              {stream}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {formData.expertise_streams.includes('Other') && (
+                        <div className="space-y-1 animate-in fade-in slide-in-from-top-2">
+                          <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Please specify expertise</label>
+                          <input type="text" name="expertise_other_text" value={formData.expertise_other_text} onChange={handleChange} className="form-premium-input" placeholder="e.g. Bio-Tech, Law, Pottery" />
+                        </div>
+                      )}
+
+                      <div className="grid md:grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Years of Experience</label>
+                          <input type="number" name="years_of_experience" value={formData.years_of_experience} onChange={handleChange} required className="form-premium-input" placeholder="e.g. 5" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">LinkedIn / Portfolio URL</label>
+                          <input type="url" name="linkedin_url" value={formData.linkedin_url} onChange={handleChange} className="form-premium-input" placeholder="https://linkedin.com/in/yourprofile" />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Short Bio</label>
+                        <textarea name="bio" rows={4} value={formData.bio} onChange={handleChange} required className="form-premium-input resize-none" placeholder="Briefly describe your background (max 200 characters)" maxLength={200} />
+                        <div className="text-right text-[10px] font-bold text-[#1E3A47]/30">{formData.bio.length} / 200</div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {currentStep === 3 && (
+                  <motion.div
+                    key="step3"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center gap-2 border-b border-[#1E3A47]/10 pb-2">
+                      <Layout className="w-4 h-4 text-[#B24531]" />
+                      <h4 className="text-[12px] font-black uppercase tracking-widest text-[#B24531]">Step 3: Your Course Idea</h4>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Proposed Course Title</label>
+                        <input type="text" name="course_title" value={formData.course_title} onChange={handleChange} required className="form-premium-input" placeholder="e.g. Advanced RAG Architectures" />
+                        <div className="flex flex-wrap gap-2">
+                          {getCourseSuggestions().map(suggestion => (
+                            <button
+                              key={suggestion}
+                              type="button"
+                              onClick={() => setFormData(prev => ({ ...prev, course_title: suggestion }))}
+                              className="text-[10px] font-bold px-3 py-1 bg-[#B24531]/5 text-[#B24531] rounded-full hover:bg-[#B24531]/10 transition-colors"
+                            >
+                              + {suggestion}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid md:grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">General Availability</label>
+                          <select name="availability" value={formData.availability} onChange={handleChange} required className="form-premium-input appearance-none">
+                            {AVAILABILITY_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Preferred Format</label>
+                          <div className="flex flex-wrap gap-2">
+                            {TEACHING_FORMATS.map(fmt => (
+                              <button
+                                key={fmt}
+                                type="button"
+                                onClick={() => handleMultiSelect('teaching_formats', fmt)}
+                                className={`text-[10px] px-3 py-1.5 rounded-lg border font-bold transition-all ${
+                                  formData.teaching_formats.includes(fmt) ? 'bg-[#1E3A47] border-[#1E3A47] text-white' : 'border-[#1E3A47]/10 text-[#1E3A47]'
+                                }`}
+                              >
+                                {fmt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center px-1">
+                          <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40">Course Description</label>
+                          <button type="button" onClick={handleAiGenerate} disabled={isGenerating} className="flex items-center gap-2 text-xs font-black text-[#B24531] hover:text-[#E64833] disabled:opacity-50 transition-colors uppercase tracking-widest bg-[#B24531]/5 px-3 py-1 rounded-full">
+                            {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                            {isGenerating ? 'Thinking...' : 'AI Assist'}
+                          </button>
+                        </div>
+                        <textarea name="course_description" rows={3} value={formData.course_description} onChange={handleChange} required className="form-premium-input resize-none" placeholder="Detailed syllabus/overview..." />
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Target Audience</label>
+                        <textarea name="target_audience" rows={2} value={formData.target_audience} onChange={handleChange} required className="form-premium-input resize-none" placeholder="Describe your ideal student..." />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {currentStep === 4 && (
+                  <motion.div
+                    key="step4"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center gap-2 border-b border-[#1E3A47]/10 pb-2">
+                      <TrendingUp className="w-4 h-4 text-[#B24531]" />
+                      <h4 className="text-[12px] font-black uppercase tracking-widest text-[#B24531]">Step 4: How You'll Earn</h4>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Payment Model</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { id: 'commission', label: 'Commission Model', sub: 'Keep 70%' },
+                            { id: 'subscription', label: 'Subscription Model', sub: 'Keep 80% + fee' }
+                          ].map(model => (
+                            <button
+                              key={model.id}
+                              type="button"
+                              onClick={() => setFormData(prev => ({ ...prev, payment_model: model.id as any }))}
+                              className={`p-2 rounded-xl border text-left transition-all ${
+                                formData.payment_model === model.id ? 'bg-[#FFC48C]/10 border-[#B24531]' : 'border-[#1E3A47]/10'
+                              }`}
+                            >
+                              <div className="font-black text-[#1E3A47] text-xs mb-0.5">{model.label}</div>
+                              <div className="text-[10px] font-medium text-[#1E3A47]/60">{model.sub}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-[#1E3A47]/40 px-1">Preferred Payout Method</label>
+                        <select name="payout_method" value={formData.payout_method} onChange={handleChange} required className="form-premium-input appearance-none">
+                          {PAYOUT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      </div>
+
+                      <div className="flex items-start gap-2 bg-[#1E3A47]/5 p-3 rounded-xl border border-[#1E3A47]/10">
+                        <div className="relative flex items-center h-4">
+                          <input
+                            type="checkbox"
+                            name="agreed_to_terms"
+                            checked={formData.agreed_to_terms}
+                            onChange={handleChange}
+                            required
+                            className="w-4 h-4 text-[#B24531] border-[#1E3A47]/20 rounded focus:ring-[#B24531]"
+                          />
+                        </div>
+                        <div className="text-[10px]">
+                          <label htmlFor="agreed_to_terms" className="font-bold text-[#1E3A47]">Terms & Conditions</label>
+                          <p className="text-[#1E3A47]/60">I agree to Ottolearn's instructor agreement.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Submit / Navigation Action */}
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t border-[#1E3A47]/10">
+                <div className="flex items-center gap-4">
+                  {currentStep > 1 && (
+                    <button
+                      type="button"
+                      onClick={prevStep}
+                      className="px-6 py-2 bg-[#1E3A47]/5 text-[#1E3A47] font-black text-xs rounded-lg hover:bg-[#1E3A47]/10 transition-all flex items-center gap-2"
+                    >
+                      <ArrowRight size={14} className="rotate-180" />
+                      Back
+                    </button>
+                  )}
+                  <div className="flex items-start gap-4 text-[#1E3A47]/40 max-w-sm">
+                    {currentStep === 4 && <CheckCircle2 size={24} className="text-[#B24531] shrink-0" />}
+                    <p className="text-[10px] md:text-xs font-medium leading-relaxed">
+                      {currentStep < 4 ? `Step ${currentStep} of 4. Your draft is automatically saved.` : 'By submitting, you agree to our Terms. We review every application personally within 48 hours.'}
+                    </p>
                   </div>
                 </div>
-              </div>
 
-              {/* Submit Action */}
-              <div className="flex flex-col md:flex-row items-center justify-between gap-12 pt-12 border-t border-[#1E3A47]/10">
-                <div className="flex items-start gap-4 text-[#1E3A47]/40 max-w-sm">
-                  <CheckCircle2 size={24} className="text-[#B24531] shrink-0" />
-                  <p className="text-xs font-medium leading-relaxed">
-                    By submitting, you agree to our Terms. We review every application personally within 48 hours.
-                  </p>
-                </div>
-
-                <div className="w-full md:w-auto text-center md:text-right space-y-4">
+                <div className="w-full md:w-auto text-center md:text-right space-y-2">
                   <motion.button
                     type="submit"
                     disabled={isSubmitting}
-                    whileHover={{ y: -4, scale: 1.02 }}
+                    whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
-                    className="w-full md:w-auto px-16 py-6 bg-[#B24531] text-white font-black text-lg rounded-2xl shadow-2xl shadow-[#B24531]/20 transition-all flex items-center justify-center gap-4 disabled:opacity-50"
+                    className="w-full md:w-48 rounded-xl bg-[#B24531] py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-[#B24531]/20 transition-all disabled:opacity-50"
                   >
-                    {isSubmitting ? "Submitting..." : "Submit Application"}
-                    {!isSubmitting && <ArrowRight size={20} strokeWidth={3} />}
+                    {isSubmitting ? "Sending..." : (currentStep < 4 ? "Next Step" : "Apply Now")}
                   </motion.button>
                   {submitMessage && (
                     <p className={`text-sm font-bold ${submitMessage.includes('successfully') ? 'text-emerald-600' : 'text-[#B24531]'}`}>
@@ -762,6 +988,7 @@ const BecomeTutor: React.FC = () => {
                 </div>
               </div>
             </form>
+            )}
           </motion.div>
         </div>
       </motion.section>

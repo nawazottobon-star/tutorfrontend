@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
-import { writeStoredSession, resetSessionHeartbeat, getAuthHeaders } from '@/utils/session';
+import { writeStoredSession, writeAdminSession, resetSessionHeartbeat, getAuthHeaders } from '@/utils/session';
 import type { StoredSession } from '@/types/session';
 import { SiteLayout } from '@/components/layout/SiteLayout';
 
@@ -52,7 +52,13 @@ export default function TutorLoginPage() {
         })
       );
       localStorage.setItem('isAuthenticated', 'true');
-      toast({ title: 'Welcome back', description: 'Tutor session active' });
+      toast({ title: 'Welcome back', description: payload.user?.role === 'admin' ? 'Admin session active' : 'Tutor session active' });
+
+      if (payload.user?.role === 'admin') {
+        writeAdminSession(payload.session?.accessToken, payload.user);
+        setLocation('/admin');
+        return;
+      }
 
       // Check if tutor has courses or submissions
       try {
